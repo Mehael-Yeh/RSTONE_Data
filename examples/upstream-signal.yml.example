@@ -33,6 +33,7 @@ jobs:
         env:
           SIGNAL_BRANCH: source-signal/rstone
           SOURCE_SHA: ${{ github.sha }}
+          VERIFY_KEY_SCOPE: ${{ github.event_name == 'workflow_dispatch' }}
         shell: bash
         run: |
           git config user.name 'rstone-data-notifier'
@@ -45,4 +46,11 @@ jobs:
           fi
           tree=$(git rev-parse 'HEAD^{tree}')
           commit=$(printf 'Notify upstream commit %s\n' "$SOURCE_SHA" | git commit-tree "$tree" "${parents[@]}")
+          if [ "$VERIFY_KEY_SCOPE" = true ]; then
+            if git push origin "$commit:refs/heads/_notification-key-scope-probe"; then
+              echo 'ERROR: notification key can write outside signal refs; fix rulesets and remove probe.' >&2
+              exit 1
+            fi
+            echo 'Protected non-signal ref rejected; testing allowed signal ref next.'
+          fi
           git push origin "$commit:refs/heads/$SIGNAL_BRANCH"
