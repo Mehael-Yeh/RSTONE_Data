@@ -140,6 +140,33 @@ def test_workflow_boundaries():
     assert not any("flutter build" in s.get("run", "").lower() for s in steps)
 
 
+def test_upstream_signal_cannot_feed_code_or_artifacts_into_privileged_publication():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    def load(p):
+        return yaml.load(p.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    receiver = load(root / ".github/workflows/receive-upstream.yml")
+    assert receiver["permissions"] == {}
+    assert receiver["on"]["push"]["branches"] == ["source-signal/rstone", "source-signal/tds"]
+    assert "environment" not in receiver["jobs"]["signal"]
+    assert not any("uses" in step for step in receiver["jobs"]["signal"]["steps"])
+    publisher = load(root / ".github/workflows/publish-data.yml")
+    trigger = publisher["on"]["workflow_run"]
+    assert trigger["workflows"] == [receiver["name"]]
+    assert trigger["branches"] == receiver["on"]["push"]["branches"]
+    job = publisher["jobs"]["publish"]
+    assert "github.ref ==" in job["if"] and "conclusion == 'success'" in job["if"]
+    # No workflow_run head SHA, caches or downloaded artifact may become privileged executable input.
+    assert "workflow_run.head_sha" not in str(job)
+    assert "download-artifact" not in str(job) and "actions/cache" not in str(job)
+    sources = [s for s in job["steps"] if s.get("id", "").startswith("source_")]
+    assert all(s["with"]["ssh-key"].endswith("SOURCE_READ_KEY }}") for s in sources)
+    notification = load(root / "examples/upstream-signal.yml.example")
+    notify = notification["jobs"]["notify"]
+    assert notify["environment"] == "rstone-data-notify" and "github.ref ==" in notify["if"]
+    assert not any("flutter" in str(s).lower() for s in notify["steps"])
+
+
 def test_mirror_copies_signed_bytes_and_keeps_pointer_on_failure(store, sources, signing, tmp_path, serve):
     from rstone_data.mirrors import deploy_mirror
     first = collect(*sources)

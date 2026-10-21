@@ -25,7 +25,7 @@ python scripts/data.py audit --rstone work/sources-new/Rstone --tds work/sources
 ```
 
 fetch 使用当前 Git 凭证助手（本地可先 `gh auth setup-git`），目标目录必须新建，任一获取失败即停止。
-CI 用 checkout 的专用只读 token。采集读取 Git blob，忽略未提交工作区修改，并验证源 origin 身份。
+CI 用 checkout 的两个专用只读 deploy key。采集读取 Git blob，忽略未提交工作区修改，并验证源 origin 身份。
 不把 .obsidian、版本信息、环境配置、附件或未批准目录当作分发资源。
 
 ## 正常批量删除

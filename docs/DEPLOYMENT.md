@@ -7,24 +7,28 @@
 确认工程师姓名、配方、供应商等原文字段均允许公开。对象、Git 历史、Actions 报告均不可视为保密存储。
 本项目不修改上游仓库的组织、权限或分支，不部署业务数据库，不创建账号系统。
 
-代码仓库已创建并推送，生产数据发布尚未启用。仓库管理员按以下清单完成其余配置：
+代码仓库和生产配置已创建；实际发布验证记录另见 `LIVE_DEPLOYMENT.md`。新环境按以下清单配置：
 
 1. 已完成：创建公开仓库，把发布代码推送到默认 `main` 分支。
 2. Pages → Build and deployment → Source 选择 **GitHub Actions**。
 3. 创建/保护 `github-pages` environment，只允许默认分支运行；限制环境和工作流文件的修改权限。
    若要求全自动发布，不设置每次必须人工审核的 environment reviewer，使用分支保护和受信发布代码保证授权。
-4. `PRIVATE_REPO_READ_TOKEN`：fine-grained PAT 或 GitHub App installation token，
-   只给 Rstone、RstoneTDS 的 Contents: read 和必要的 Metadata: read。不需要源库写入权限。
-   Actions 默认 GITHUB_TOKEN 无法读取另一个私有仓库；不要扩大它替代专用只读 token。
+4. 当前使用两个独立的只读 SSH deploy key：`RSTONE_SOURCE_READ_KEY` 和 `TDS_SOURCE_READ_KEY`，
+   私钥仅在数据仓库的 `github-pages` environment Secrets 中，公钥分别注册在对应源仓库。
+   `scripts/setup_deploy_key.py` 直接经 stdin 写入 Secret，不落地私钥，不覆盖活跃 Secret；安装失败撤销公钥。
+   每个密钥只能读取一个源库，不使用个人账号的广泛权限凭证。若未来改用 `PRIVATE_REPO_READ_TOKEN`，
+   则使用只对两个源库 Contents: read 的 fine-grained PAT/App token，并同步更改 checkout 输入。
+   Actions 默认 GITHUB_TOKEN 无法读取另一个私有仓库。
 5. 生成 Ed25519 seed，并通过 stdin 写入 environment Secret `DATA_SIGNING_PRIVATE_KEY`。
    用 `python scripts/setup_signing.py --repository Mehael-Yeh/RSTONE_Data --key-id production-2026`
    将私钥直接送入 GitHub Secrets，同时生成只含公钥的 config 文件变更。脚本不会把私钥写入文件或日志。
    审核并提交 `config/trusted_keys.json` 的公钥，再设置 environment variable `DATA_SIGNING_KEY_ID=production-2026`。
    `DATA_SIGNING_SECRET_NAME` 初始可不设（默认 DATA_SIGNING_PRIVATE_KEY），轮换时选择独立的新 Secret，不能先覆盖活跃私钥。
 6. 审核实际发布范围后设置 environment variable `PUBLIC_DATA_APPROVED=true`。
-   `config/trusted_keys.json` 初始为空是有意的：未配置密钥时生产失败，本地测试自己生成临时密钥。
+   生产公钥已记录在 `config/trusted_keys.json`；未配置匹配私钥时生产失败，本地测试自己生成临时密钥。
 7. 给此仓库 GITHUB_TOKEN 开启 Contents: write、Pages: write、id-token: write（工作流中已最小化声明）。
-   发布代码所在默认分支应受保护；`distribution` 分支仅工作流可写，允许 workflow bot 正常 fast-forward push。
+   默认 token 权限保持 read，不能批准 PR。默认分支只允许仓库所有者更新；distribution 只允许所有者与
+   github-actions[bot] 更新。规则使用个人仓库支持的 User actor，不将通知 deploy key 加入 bypass。
 8. 第一次手动运行 Publish RSTONE Data，验证报告、签名、公网对象、CORS 和 latest。
 
 首次建仓的创建/推送命令如下，当前仓库已完成，勿重复执行创建命令：
@@ -35,7 +39,7 @@ git push -u origin HEAD:main
 gh repo edit Mehael-Yeh/RSTONE_Data --default-branch main
 ```
 
-预期入口为 `https://Mehael-Yeh.github.io/RSTONE_Data/latest.json`；该地址是部署目标，**当前不是已验证上线地址**。
+标准入口为 `https://mehael-yeh.github.io/RSTONE_Data/latest.json`；上线和验证状态见 `LIVE_DEPLOYMENT.md`。
 自定义域名应在 Pages 设置中另行配置，HTTP 重定向不被校验器接受，填写最终 HTTPS baseUrl。
 
 ## 事务和状态分支
@@ -67,11 +71,27 @@ GitHub schedule 可能延迟，不承诺准点。repository_dispatch 只作为�
 
 ## 跨源仓库通知
 
-`examples/upstream-dispatch.yml.example` 是待协调安装的模板。
-Rstone 使用 `master` 和三个 Markdown 目录过滤；RstoneTDS 使用 `main` 和根目录 `*.TDS.md` 过滤。
-源库各配置 `DATA_DISPATCH_TOKEN`，只对目标 RSTONE_Data 授予 GitHub repository_dispatch 所需 Contents: write；
-该通知凭证不能复用私有源只读凭证。更细权限需要未来使用受限 GitHub App/转发器，第一阶段不引入服务。
-模板仅通知数据仓库，不发 Flutter 工作流事件，不构建 APK。未安装模板也可用定时扫描发现变化。
+已安装的通知基于 `examples/upstream-signal.yml.example`。Rstone 使用 `master` 和三个 Markdown
+目录过滤；RstoneTDS 使用 `main` 和根目录 `*.TDS.md` 过滤。也支持手动通知，用于连接验收。
+
+每个源库的 `rstone-data-notify` environment 只允许自己的默认分支访问。各保存独立的
+`RSTONE_DATA_SIGNAL_KEY`，对应公开数据仓库的 write deploy key。GitHub 层的写权限只授予该公开仓库，
+再用 active rulesets 将密钥可写的 ref 限制到 `source-signal/rstone`、`source-signal/tds`。
+所有其他代码分支、distribution 和标签都限制 creation/update/deletion，通知密钥不在 bypass 列表。
+两个通知密钥均可写两条通知分支；它们只能唤醒同一发布器，不决定要发布的内容。
+禁止移除这些规则后仍保留通知密钥。若需授权其他维护者，应单独调整规则，不能给 deploy key 全局 bypass。
+
+通知只推送一个以公开 main 文件树创建的提交，包含上游 commit SHA，没有私有源文件。
+无权限的 Receive upstream signal 工作流不 checkout、下载 artifact、恢复缓存或使用 environment。
+其成功触发 `workflow_run`；GitHub 在默认 main 执行发布器，发布器只读取固定的两个源分支，
+从不运行通知分支代码或使用其产物。发布私钥和源读取密钥仅对 main 的 github-pages environment 开放。
+参考 [workflow_run 默认分支与安全边界](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run)。
+
+若已有受限 App/PAT，可替换为 `examples/upstream-dispatch.yml.example` 的 repository_dispatch：
+`DATA_DISPATCH_TOKEN` 只授权目标 RSTONE_Data 的 Contents: write，不能复用私有源读取凭证。
+两种通知都不发 Flutter 工作流事件，不构建 APK。每六小时轮询在通知异常时仍可发现变化。
+deploy key 无自动到期，应定期轮换；撤销创建它的 OAuth 授权也可能撤销 deploy key，
+见 [GitHub deploy keys](https://docs.github.com/en/rest/deploy-keys/deploy-keys)。
 
 ## 镜像合同
 
