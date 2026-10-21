@@ -27,8 +27,9 @@
 6. 审核实际发布范围后设置 environment variable `PUBLIC_DATA_APPROVED=true`。
    生产公钥已记录在 `config/trusted_keys.json`；未配置匹配私钥时生产失败，本地测试自己生成临时密钥。
 7. 给此仓库 GITHUB_TOKEN 开启 Contents: write、Pages: write、id-token: write（工作流中已最小化声明）。
-   默认 token 权限保持 read，不能批准 PR。默认分支只允许仓库所有者更新；distribution 只允许所有者与
-   github-actions[bot] 更新。规则使用个人仓库支持的 User actor，不将通知 deploy key 加入 bypass。
+   默认 token 权限保持 read，不能批准 PR。默认分支要求 PR，只有所有者可合并；distribution 只允许
+   github-actions[bot] 直接更新，所有者通过 PR 修改。不为所有者设置 always bypass：deploy key
+   会继承创建者的此类例外。通知密钥不能直接更改生产代码、状态或标签。
 8. 第一次手动运行 Publish RSTONE Data，验证报告、签名、公网对象、CORS 和 latest。
 
 首次建仓的创建/推送命令如下，当前仓库已完成，勿重复执行创建命令：
@@ -76,10 +77,12 @@ GitHub schedule 可能延迟，不承诺准点。repository_dispatch 只作为�
 
 每个源库的 `rstone-data-notify` environment 只允许自己的默认分支访问。各保存独立的
 `RSTONE_DATA_SIGNAL_KEY`，对应公开数据仓库的 write deploy key。GitHub 层的写权限只授予该公开仓库，
-再用 active rulesets 将密钥可写的 ref 限制到 `source-signal/rstone`、`source-signal/tds`。
-所有其他代码分支、distribution 和标签都限制 creation/update/deletion，通知密钥不在 bypass 列表。
-两个通知密钥均可写两条通知分支；它们只能唤醒同一发布器，不决定要发布的内容。
-禁止移除这些规则后仍保留通知密钥。若需授权其他维护者，应单独调整规则，不能给 deploy key 全局 bypass。
+再用 active rulesets 保护生产 ref：main 必须通过 PR 且仅所有者能合并，distribution 仅发布 bot
+可直接写入，标签禁止写入。所有者的 bypass 仅为 pull_request，不能设置 always，否则其部署密钥也会越权。
+通知密钥可写公开仓库的开发分支（GitHub deploy key 不提供精确单 ref 授权），但无法合并 PR、
+直接更改生产分支或访问 API/私有源库；这些分支的代码不获得发布 environment Secrets。
+通知正常只更新 `source-signal/rstone`、`source-signal/tds`，不决定发布内容。
+禁止移除生产 ref 规则后仍保留通知密钥。通知工作流手动运行会先实际验证 main 拒绝写入，失败立即停止。
 
 通知只推送一个以公开 main 文件树创建的提交，包含上游 commit SHA，没有私有源文件。
 无权限的 Receive upstream signal 工作流不 checkout、下载 artifact、恢复缓存或使用 environment。
