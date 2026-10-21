@@ -1,0 +1,160 @@
+name: Publish RSTONE Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_sequence:
+        description: Restore a retained sequence as a NEW signed release (blank for upstream)
+        type: string
+        required: false
+      deletion_approval:
+        description: Exact baselineSequence:mappingSha256 from failed deletion report
+        type: string
+        required: false
+  repository_dispatch:
+    types: [rstone-data-changed]
+  schedule:
+    - cron: '23 */6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rstone-data-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: github-pages
+      url: ${{ steps.final.outputs.page_url }}
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    env:
+      PYTHONUTF8: '1'
+      PUBLIC_DATA_APPROVED: ${{ vars.PUBLIC_DATA_APPROVED }}
+    steps:
+      - name: Checkout reviewed publisher
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: publisher
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install hash-locked dependencies
+        working-directory: publisher
+        run: python -m pip install --require-hashes -r requirements-ci.txt
+      - name: Run protocol and publication tests
+        working-directory: publisher
+        run: python -m pytest -q
+      - name: Require publication scope approval
+        run: test "$PUBLIC_DATA_APPROVED" = true
+      - name: Load durable distribution state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python publisher/scripts/ci_state.py checkout --repository publisher --destination store
+      - name: Checkout Rstone master
+        if: steps.state.outputs.pending != 'true' && inputs.rollback_sequence == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Mehael-Yeh/Rstone
+          ref: master
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: sources/Rstone
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Checkout RstoneTDS main
+        if: steps.state.outputs.pending != 'true' && inputs.rollback_sequence == ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Mehael-Yeh/RstoneTDS
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_READ_TOKEN }}
+          path: sources/RstoneTDS
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Validate and prepare or resume signed release
+        id: prepare
+        env:
+          DATA_SIGNING_PRIVATE_KEY: ${{ secrets.DATA_SIGNING_PRIVATE_KEY }}
+          DATA_SIGNING_KEY_ID: ${{ vars.DATA_SIGNING_KEY_ID }}
+          DATA_DELETION_APPROVAL: ${{ inputs.deletion_approval }}
+          ROLLBACK_SEQUENCE: ${{ inputs.rollback_sequence }}
+        shell: bash
+        run: |
+          args=()
+          if [ -n "$ROLLBACK_SEQUENCE" ]; then
+            args+=(--rollback "$ROLLBACK_SEQUENCE")
+          fi
+          python publisher/scripts/data.py prepare --store store \
+            --rstone sources/Rstone --tds sources/RstoneTDS \
+            --report reports/prepare.json --github-output "${args[@]}"
+      - name: Persist immutable resources and pending recovery marker
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python publisher/scripts/ci_state.py checkpoint --store store --message 'data stage immutable release'
+      - name: Configure Pages
+        if: steps.prepare.outputs.changed == 'true'
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - name: Upload staging site with previous latest
+        if: steps.prepare.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: rstone-staging
+          path: store/public
+      - name: Deploy immutable resources before pointer
+        if: steps.prepare.outputs.changed == 'true'
+        id: staging
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: rstone-staging
+      - name: Verify ALL objects over public HTTPS and promote local pointer
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          PAGES_URL: ${{ steps.staging.outputs.page_url }}
+        run: |
+          python publisher/scripts/data.py promote --store store --base-url "$PAGES_URL" \
+            --require-cors --attempts 12 --delay 10 --keep-pending --report reports/promote.json
+      - name: Persist new pointer and recovery marker before final deployment
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python publisher/scripts/ci_state.py checkpoint --store store --message 'data promote verified pointer'
+      - name: Upload final site
+        if: steps.prepare.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: rstone-final
+          path: store/public
+      - name: Deploy latest pointer last
+        if: steps.prepare.outputs.changed == 'true'
+        id: final
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: rstone-final
+      - name: Verify live latest and complete durable transaction
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          PAGES_URL: ${{ steps.final.outputs.page_url }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python publisher/scripts/data.py complete --store store --base-url "$PAGES_URL" \
+            --require-cors --attempts 12 --delay 10 --report reports/published.json
+          python publisher/scripts/ci_state.py checkpoint --store store --message 'data acknowledge public deployment'
+      - name: Retain structured success or failure reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: data-publication-report
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14

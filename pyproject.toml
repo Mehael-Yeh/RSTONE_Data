@@ -3,13 +3,13 @@ name = "rstone-data"
 version = "1.0.0"
 description = "Signed, content-addressed RSTONE data distribution"
 requires-python = ">=3.12"
-dependencies = ["cryptography==46.0.3", "PyYAML==6.0.3"]
+dependencies = ["cryptography==50.0.2", "PyYAML==6.0.3"]
 
 [project.scripts]
 rstone-data = "rstone_data.cli:main"
 
 [build-system]
-requires = ["setuptools==80.9.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]

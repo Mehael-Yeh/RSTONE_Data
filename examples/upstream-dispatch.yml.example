@@ -1,0 +1,27 @@
+# Copy into each PRIVATE upstream only after coordinated review.
+# For Rstone: master. For RstoneTDS: change the branch filter to main.
+name: Notify RSTONE data publisher
+on:
+  push:
+    branches: [master]
+    paths:
+      - '产品列表/**/*.md'
+      - '产品应用/**/*.md'
+      - '产品配方/**/*.md'
+      # RstoneTDS uses '*.TDS.md' instead of the three filters above.
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch data publication only
+        env:
+          GH_TOKEN: ${{ secrets.DATA_DISPATCH_TOKEN }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          gh api repos/Mehael-Yeh/RSTONE_Data/dispatches \
+            -f event_type=rstone-data-changed \
+            -f "client_payload[repository]=$SOURCE_REPO" \
+            -f "client_payload[sha]=$SOURCE_SHA"

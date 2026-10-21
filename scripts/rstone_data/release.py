@@ -29,6 +29,7 @@ class Store:
         self.root = Path(root)
         self.public = self.root / "public"
         self.state = self.root / "state"
+        require(not any(p.is_symlink() for p in (self.root, self.public, self.state)), "symlink in store root")
         self.keys = keys
 
     def latest_bytes(self):
