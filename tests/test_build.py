@@ -39,12 +39,14 @@ def test_add_modify_delete_rename_move_and_deduplicate(sources):
     assert len(diff["unchanged"]) == 2
     assert sha256(second.files["产品列表/RS101.md"]) == sha256(raw)
     assert mapping_digest(inventory(first.files)) != mapping_digest(inventory(second.files))
-    approval = deletion_approval(old, inventory(second.files))
+    check_deletions(old, inventory(second.files))
+    fewer = [r for r in inventory(second.files) if not r["path"].endswith("RD200.md")]
+    approval = deletion_approval(old, fewer)
     with pytest.raises(DataError, match="bulk deletion"):
-        check_deletions(old, inventory(second.files))
-    check_deletions(old, inventory(second.files), approval=approval)
+        check_deletions(old, fewer)
+    check_deletions(old, fewer, approval=approval)
     with pytest.raises(DataError):
-        check_deletions(old, inventory(second.files), approval="2:" + approval.split(":")[1])
+        check_deletions(old, fewer, approval="2:" + approval.split(":")[1])
 
 
 def test_source_failure_and_empty_directory(sources, tmp_path):

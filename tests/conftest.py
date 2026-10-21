@@ -1,6 +1,12 @@
 import subprocess
+import base64
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+from rstone_data.release import Store
+from rstone_data.signing import Signer
 
 
 def run_git(path, *arguments):
@@ -35,3 +41,15 @@ def sources(tmp_path):
     commit_all(rstone)
     commit_all(tds)
     return rstone, tds
+
+
+@pytest.fixture
+def signing():
+    private = Ed25519PrivateKey.generate()
+    keys = {"test-ephemeral": base64.b64encode(private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode()}
+    return Signer("test-ephemeral", private), keys
+
+
+@pytest.fixture
+def store(tmp_path, signing):
+    return Store(tmp_path / "store", signing[1])

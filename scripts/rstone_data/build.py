@@ -34,10 +34,17 @@ def check_deletions(previous, records, maximum=0.25, approval=None):
         require(any(r["path"].startswith(root + "/") for r in records), f"empty data namespace: {root}")
     if not previous:
         return
-    old = {r["path"] for r in previous["files"]}
-    new = {r["path"] for r in records}
-    groups = [old] + [{p for p in old if p.startswith(root + "/")} for root in ROOTS]
-    excessive = any(group and len(group - new) / len(group) > maximum for group in groups)
+    old = {r["path"]: r["sha256"] for r in previous["files"]}
+    new = {r["path"]: r["sha256"] for r in records}
+    retained_hashes = set(new.values())
+    excessive = False
+    for root in (None, *ROOTS):
+        old_group = {p for p in old if root is None or p.startswith(root + "/")}
+        new_group = {p for p in new if root is None or p.startswith(root + "/")}
+        # Moves preserve content; a true count collapse or lost content still needs approval.
+        lost = {p for p in old_group - new_group if old[p] not in retained_hashes}
+        if old_group and max(len(lost), len(old_group) - len(new_group)) / len(old_group) > maximum:
+            excessive = True
     if excessive:
         expected = deletion_approval(previous, records)
         require(approval == expected, "abnormal bulk deletion; exact approval required: " + expected)
