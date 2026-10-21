@@ -48,7 +48,10 @@
     "modified": 0,
     "deleted": 0,
     "unchanged": 187,
-    "observedSourceCommits": null
+    "observedSourceCommits": {
+      "Mehael-Yeh/Rstone": "994202ecf5cacbbfee7108da20678301d9e4a4eb",
+      "Mehael-Yeh/RstoneTDS": "5bab8664e242320682a6ea605c6e9de571b99e55"
+    }
   },
   "mirrors": [
     {
