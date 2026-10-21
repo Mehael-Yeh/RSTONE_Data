@@ -108,7 +108,7 @@ jobs:
         run: python publisher/scripts/ci_state.py checkpoint --store store --message 'data stage immutable release'
       - name: Configure Pages
         if: steps.prepare.outputs.changed == 'true'
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Upload staging site with previous latest
         if: steps.prepare.outputs.changed == 'true'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
