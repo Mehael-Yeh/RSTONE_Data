@@ -1,0 +1,6 @@
+{
+  "minAppVersion": "1.0.0",
+  "maxDeletionFraction": 0.25,
+  "retainVersions": 30,
+  "gcGraceDays": 7
+}
