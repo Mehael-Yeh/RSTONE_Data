@@ -106,13 +106,77 @@
     "repositoryPermission": "Actions:write",
     "codeWritePermission": false,
     "requiredSecret": "DATA_DISPATCH_TOKEN",
-    "pendingUserCredential": true,
-    "pollFallbackHours": 6
+    "pendingUserCredential": false,
+    "pollFallbackHours": 6,
+    "verified": true,
+    "verifiedAt": "2026-10-21T05:37:01Z",
+    "validationTrigger": "upstream workflow_dispatch",
+    "latestUnchanged": true,
+    "chains": [
+      {
+        "repository": "Mehael-Yeh/Rstone",
+        "sourceRunId": 39550160974,
+        "sourceRunUrl": "https://github.com/Mehael-Yeh/Rstone/actions/runs/39550160974",
+        "conclusion": "success",
+        "branch": "master",
+        "publisherRunId": 39550172045,
+        "publisherRunUrl": "https://github.com/Mehael-Yeh/RSTONE_Data/actions/runs/39550172045",
+        "publisherHead": "3e9e05064c704736c72ae1adf492a9b3a4f4a71c",
+        "publisherConclusion": "success",
+        "operatorApprovalRequired": false,
+        "pagesRedeployed": false,
+        "summary": {
+          "status": "unchanged",
+          "sequence": 1,
+          "added": 0,
+          "modified": 0,
+          "deleted": 0,
+          "unchanged": 187,
+          "newObjects": 0,
+          "uploadedBytes": 0,
+          "sourceCommits": {
+            "Mehael-Yeh/Rstone": "994202ecf5cacbbfee7108da20678301d9e4a4eb",
+            "Mehael-Yeh/RstoneTDS": "5bab8664e242320682a6ea605c6e9de571b99e55"
+          }
+        }
+      },
+      {
+        "repository": "Mehael-Yeh/RstoneTDS",
+        "sourceRunId": 39550303922,
+        "sourceRunUrl": "https://github.com/Mehael-Yeh/RstoneTDS/actions/runs/39550303922",
+        "conclusion": "success",
+        "branch": "main",
+        "publisherRunId": 39550315143,
+        "publisherRunUrl": "https://github.com/Mehael-Yeh/RSTONE_Data/actions/runs/39550315143",
+        "publisherHead": "3e9e05064c704736c72ae1adf492a9b3a4f4a71c",
+        "publisherConclusion": "success",
+        "operatorApprovalRequired": false,
+        "pagesRedeployed": false,
+        "summary": {
+          "status": "unchanged",
+          "sequence": 1,
+          "added": 0,
+          "modified": 0,
+          "deleted": 0,
+          "unchanged": 187,
+          "newObjects": 0,
+          "uploadedBytes": 0,
+          "sourceCommits": {
+            "Mehael-Yeh/Rstone": "994202ecf5cacbbfee7108da20678301d9e4a4eb",
+            "Mehael-Yeh/RstoneTDS": "5bab8664e242320682a6ea605c6e9de571b99e55"
+          }
+        }
+      }
+    ]
   },
   "operatorControls": {
     "environment": "data-operations",
     "reviewer": "Mehael-Yeh",
-    "requiresApprovalFor": ["rollback_sequence", "deletion_approval", "prune-history"],
+    "requiresApprovalFor": [
+      "rollback_sequence",
+      "deletion_approval",
+      "prune-history"
+    ],
     "approvalPermission": "Deployments:write",
     "notificationTokenMayApprove": false
   },
