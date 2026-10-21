@@ -17,7 +17,8 @@ python scripts/demo.py --output work/demo-new --report reports/demo.json
 Dart：在 examples/flutter_protocol 执行 `dart pub get --enforce-lockfile`、`dart analyze`、`dart test`。
 Python lint 与 Actions 校验分别使用 Ruff 0.17.1 和 actionlint 1.7.12；actionlint 二进制来自官方发布并核对 SHA-256。
 依赖 hash lock 安装已运行。测试仅在临时 Git 仓库、临时签名密钥和本地 HTTP 服务运行，不改动源仓库或构建 APK。
-最终验收：65 项 Python 测试、13 项 Dart 测试；Dart analyze、Ruff、3 个 Actions 工作流的 actionlint 均通过。
+最终验收：68 项 Python 测试、13 项 Dart 测试；Dart analyze、Ruff、3 个 Actions 工作流的 actionlint 均通过。
+GitHub 的 Ubuntu/Windows 与 Dart 矩阵实际通过，生产配置与公网证据见 LIVE_DEPLOYMENT.md。
 
 | 用户验收项 | 实际运行测试 |
 | --- | --- |
@@ -46,7 +47,8 @@ Python lint 与 Actions 校验分别使用 Ruff 0.17.1 和 actionlint 1.7.12；a
 
 两个私有源均通过当前登录账号只读获取，精确 commit 和统计见 SOURCE_AUDIT.md、SOURCE_VALIDATION.json。
 187 份资料实际通过编码/YAML/命名校验；99 个工程师字段需公开范围审核；无失效产品引用警告。
-这证明指定 Git 快照的资料格式兼容，不等于真实资料已公开，也不等于上线后不会出现其他业务错误。
+这证明指定 Git 快照的资料格式兼容。之后已按授权公开首版实际资料，公网证据单独记录在 LIVE_DEPLOYMENT.md；
+该审计快照的 SHA 与首版的最新 SHA 不同，首版精确来源以签名 manifest.sourceCommits 为准。
 
 ## 模拟端到端结果
 
@@ -68,12 +70,12 @@ scripts/demo.py 使用模拟源和真实 Ed25519/HTTP 流程：首次客户端�
 ## 公开仓库与尚待外部验收
 
 公开代码仓库已创建并推送：[Mehael-Yeh/RSTONE_Data](https://github.com/Mehael-Yeh/RSTONE_Data)，默认分支 `main`。
-真实私有源内容未随代码推送，生产发布没有启用。
+生产数据在 distribution 分支和 Pages 上线；main 仍只有发布代码、协议、测试、公开公钥和模拟示例。
+已完成受保护发布环境、两枚源只读密钥、签名、两阶段 Pages 发布及全部 187 对象的公网验证。
+备用 GitHub raw 入口通过相同校验；真实联网参考客户端重复同步的对象请求为 0。
 
-- 配置 Pages、受保护发布环境、私有源只读 token、签名私钥和可信公钥。
-- 确认全部公开字段范围，设定真实首个兼容客户端 minAppVersion，再启用 PUBLIC_DATA_APPROVED。
-- 在两个源仓库协调安装通知模板，验证实际源 commit 更新触发数据发布且没有 APK 构建。
-- 在真实公开 HTTPS URL 检查完整对象、签名、CORS、两阶段切换和客户端真实联网/离线行为。
-- 在 Flutter 仓库协调集成同步/存储/界面，并完成 Android/iOS/Web 设备验收。
-
-上述外部步骤没有在本地执行，也没有伪造在线发布成功。Pages 整站 artifact 传输与客户端文件增量是不同指标，详见 OPERATIONS.md。
+仍需外部完成：用户创建/保存仅 Actions: write 的 DATA_DISPATCH_TOKEN，才启用两源即时通知；
+手动发布和六小时定时检查不依赖该凭证。Flutter 客户端尚待独立集成和 Android/iOS/Web 设备验收；
+1.0.0 是保留的 v1 客户端版本下限，不是现有 0.0.263 APK 的兼容声明。
+真实生产没有为了测试而修改业务资料；增删改、跨目录移动、批删、故障回滚等通过上述可运行模拟测试验收。
+Pages 整站 artifact 传输与客户端文件增量是不同指标，详见 OPERATIONS.md。

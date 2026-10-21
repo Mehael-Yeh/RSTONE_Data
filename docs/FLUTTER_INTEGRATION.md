@@ -5,6 +5,11 @@
 `scripts/rstone_data/client.py` 提供完整可执行的多镜像下载、缓存、原子切换和离线 ZIP 导入参考。
 Dart 示例不代替应用存储层、Web IndexedDB、网络重试 UI 或后台任务；这些需在客户端仓库实现并做实际设备验证。
 
+生产入口已验证，可使用 `config/mirrors.json` 中的 Pages 与 GitHub raw 两个 baseUrl；二者属于同一服务商，
+不等于独立基础设施容灾。首版为 sequence=1，dataVersion=2026.10.21.001，共 187 份文件。
+客户端编译时固定 `config/trusted_keys.json` 的 production-2026 公钥；不能运行时下载公钥后自动信任。
+Python 参考客户端已真实联网验证首次 187 个对象 / 84,388 字节，第二次同步 0 个对象请求；这不是 Flutter 设备验收。
+
 ## 接入当前服务
 
 当前 `ObsidianDataService` 把 assets/产品列表.json、产品应用.json、产品配方.json、产品TDS.json 当索引，

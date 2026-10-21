@@ -102,6 +102,11 @@ Contents: write，因此当前默认通知不采用它。两种方式都不触�
 
 ## 镜像合同
 
+已验证的两个入口见 `config/mirrors.json`。备用入口是 distribution/public 的 GitHub raw，和 Pages
+共用 GitHub 基础设施；它提供不同访问端点，不作为独立服务商容灾或国内加速的承诺。
+raw 入口直接复用状态分支中的相同签名与对象。分支提交可原子包含对象和指针，但 CDN 仍可能滞后；
+客户端需按协议校验、切换镜像和保留旧 generation。
+
 镜像必须复制同一批已签名的原始字节，不重新生成版本、JSON 或签名。只改变 baseUrl。
 对象和不可变清单先复制，在目标公开 HTTPS 上验证指定候选（`verify --pointer-file`），最后写 latest。
 `python scripts/mirror.py --source-store <store> --target <镜像站点目录> --base-url https://mirror.example/data --keys config/trusted_keys.json`

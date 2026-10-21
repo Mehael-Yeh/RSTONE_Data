@@ -1,0 +1,111 @@
+{
+  "checkedAt": "2026-10-21T04:40:32Z",
+  "latest": {
+    "dataVersion": "2026.10.21.001",
+    "keyId": "production-2026",
+    "manifestPath": "manifests/000001.json",
+    "manifestSha256": "e6e32540db6ecbda3cb869343b22bb4a400d28a73331ed858e59506228ef882f",
+    "protocolVersion": 1,
+    "sequence": 1,
+    "signaturePath": "manifests/000001.sig"
+  },
+  "manifest": {
+    "sequence": 1,
+    "dataVersion": "2026.10.21.001",
+    "schemaVersion": 1,
+    "minAppVersion": "1.0.0",
+    "publishedAt": "2026-10-21T04:33:35Z",
+    "sourceCommits": {
+      "Mehael-Yeh/Rstone": "3bd65259e01b40167f13d45b96173c6d9255ec2b",
+      "Mehael-Yeh/RstoneTDS": "afac9f9c1349a1f47d5763598fd0110f6430d496"
+    }
+  },
+  "fileCount": 187,
+  "counts": {
+    "产品TDS": 51,
+    "产品列表": 99,
+    "产品应用": 21,
+    "产品配方": 16
+  },
+  "publication": {
+    "runId": 39544209701,
+    "attempt": 2,
+    "url": "https://github.com/Mehael-Yeh/RSTONE_Data/actions/runs/39544209701",
+    "conclusion": "success",
+    "newObjects": 187,
+    "uploadedBytes": 84388,
+    "pendingCleared": true
+  },
+  "noOp": {
+    "runId": 39545095058,
+    "url": "https://github.com/Mehael-Yeh/RSTONE_Data/actions/runs/39545095058",
+    "conclusion": "success",
+    "status": "unchanged",
+    "sequence": 1,
+    "newObjects": 0,
+    "uploadedBytes": 0,
+    "added": 0,
+    "modified": 0,
+    "deleted": 0,
+    "unchanged": 187,
+    "observedSourceCommits": null
+  },
+  "mirrors": [
+    {
+      "baseUrl": "https://mehael-yeh.github.io/RSTONE_Data",
+      "verification": {
+        "fileCount": 187,
+        "sequence": 1,
+        "status": "verified"
+      },
+      "cors": "*",
+      "cacheControl": "max-age=600"
+    },
+    {
+      "baseUrl": "https://raw.githubusercontent.com/Mehael-Yeh/RSTONE_Data/distribution/public",
+      "verification": {
+        "fileCount": 187,
+        "sequence": 1,
+        "status": "verified"
+      },
+      "cors": "*",
+      "cacheControl": "max-age=300"
+    }
+  ],
+  "referenceClient": {
+    "mode": "real-public-HTTPS-reference-client",
+    "flutterAppTested": false,
+    "apkBuilt": false,
+    "first": {
+      "status": "synchronized",
+      "sequence": 1,
+      "fileCount": 187,
+      "downloadedObjects": 187,
+      "downloadedBytes": 84388
+    },
+    "firstNetwork": {
+      "objectGets": 187,
+      "objectBytes": 84388
+    },
+    "second": {
+      "status": "unchanged",
+      "sequence": 1,
+      "downloadedObjects": 0,
+      "downloadedBytes": 0
+    },
+    "secondNetwork": {
+      "objectGets": 0,
+      "objectBytes": 0
+    }
+  },
+  "notifications": {
+    "transport": "workflow_dispatch",
+    "repositoryPermission": "Actions:write",
+    "codeWritePermission": false,
+    "requiredSecret": "DATA_DISPATCH_TOKEN",
+    "pendingUserCredential": true,
+    "pollFallbackHours": 6
+  },
+  "apkBuilt": false,
+  "flutterClientIntegrated": false
+}
