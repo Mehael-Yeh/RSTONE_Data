@@ -118,7 +118,7 @@ jobs:
       - name: Deploy immutable resources before pointer
         if: steps.prepare.outputs.changed == 'true'
         id: staging
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: rstone-staging
       - name: Verify ALL objects over public HTTPS and promote local pointer
@@ -142,7 +142,7 @@ jobs:
       - name: Deploy latest pointer last
         if: steps.prepare.outputs.changed == 'true'
         id: final
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
           artifact_name: rstone-final
       - name: Verify live latest and complete durable transaction
