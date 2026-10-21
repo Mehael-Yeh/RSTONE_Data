@@ -7,16 +7,45 @@
 
 - Pages 使用 GitHub Actions，HTTPS 已开启，baseUrl 为 `https://mehael-yeh.github.io/RSTONE_Data/`。
 - `github-pages` environment 只允许 `main`；不要求每次人工批准，以支持自动发布。
+- `data-operations` 只允许 main，回滚、异常删除批准和历史清理需 Mehael-Yeh 独立审核；该 gate 无 Secrets。
+  通知令牌仅 Actions:write，不能批准需要 Deployments:write 的审核接口。
 - `DATA_SIGNING_KEY_ID=production-2026`，私钥只存于 environment Secret，公钥见 `config/trusted_keys.json`。
 - `PUBLIC_DATA_APPROVED=true` 对应本次已授权的公开范围，包含工程师、配方、供应商等源字段。
 - Rstone/master 与 RstoneTDS/main 各有一枚独立的只读 deploy key；发布器不拥有源库写入凭证。
-- 两个源库各有默认分支限定的 `rstone-data-notify` environment 和独立的通知密钥。
-- 数据仓库四组 active rulesets 保护代码分支、默认分支、distribution 和标签，通知密钥只能写两条信号分支。
+- 两个源库各有默认分支限定的 `rstone-data-notify` environment；通知使用仅 Actions:write 的受限令牌。
+  凭证需用户本人创建并存入 DATA_DISPATCH_TOKEN；是否已验证见下文，缺失时不冒充即时通知正常。
+- 数据仓库四组 active rulesets 要求 main 通过 PR、仅所有者合并，禁止 distribution 和标签的强制更新/删除。
+  所有者的 main 例外仅用于 PR 合并。已经撤销测试用通知 write key 和信号分支，不复用个人广泛权限 token。
 - Actions 默认权限为 read，不能批准 PR；发布任务才声明所需写权限。通知接收器没有权限或生产 Secrets。
 - 保留 30 个历史版本，GC 宽限 7 天；源内容大幅减少需精确批准，整体空库始终禁止发布。
 - `minAppVersion=1.0.0` 为保留的首个 v1 客户端版本下限；现有 Flutter 0.0.263 尚未接入此协议。
 
 ## 验收
 
-首次真实发布和上游通知链正在执行验证。只有本页记录成功的运行和公开 HTTPS 校验结果后，才声明上线完成。
-本项目不修改 Flutter 客户端和 APK 构建流程。
+首次真实发布完成：[运行 39544209701，attempt 2](https://github.com/Mehael-Yeh/RSTONE_Data/actions/runs/39544209701)。
+首轮因状态分支保护拒绝 GitHub 内置 token 的写入，在公开 latest 创建之前停止；修正为允许正常
+fast-forward、禁止 force push/删除后重跑成功。没有发布空库，没有降低签名校验要求。
+
+- `sequence=1`，`dataVersion=2026.10.21.001`，发布时间 `2026-10-21T04:33:35Z`。
+- 共 187 文件：产品列表 99、产品应用 21、产品配方 16、TDS 51。
+- 新对象 187，新增原始对象载荷 84,388 字节；此数字不含 Pages 两次整站 artifact 的实际传输。
+- Manifest SHA-256：`e6e32540db6ecbda3cb869343b22bb4a400d28a73331ed858e59506228ef882f`。
+- 发布流程完成公网全部对象/签名/CORS 校验，最终 latest 验证成功后清除 pending。
+- 独立从本机分别完整验证 Pages 和 raw 备用入口：均为 sequence=1、187 文件、签名/大小/SHA-256/CORS 通过。
+- 真实联网 Python 参考客户端：首次对象 GET 187 次 / 84,388 字节，再次同步对象 GET **0 次 / 0 字节**。
+- [内容未变的再次正式运行](https://github.com/Mehael-Yeh/RSTONE_Data/actions/runs/39545095058) 成功：
+  187 份均未变化，0 新对象、0 新增载荷，没有签发 sequence=2，也没有再次部署 Pages。
+- Pages 的 `/state/pending.json` 与 `/sources/Rstone/.git/config` 返回 404；只有 public/ 被上传为站点。
+
+公网入口：[Pages latest](https://mehael-yeh.github.io/RSTONE_Data/latest.json)、
+[raw latest](https://raw.githubusercontent.com/Mehael-Yeh/RSTONE_Data/distribution/public/latest.json)。
+二者共用 GitHub 基础设施，不能视为独立服务商容灾。观测到 Pages Cache-Control 为 max-age=600，raw 为
+max-age=300，CORS 均为 `*`；客户端为 latest/清单加随机查询参数并验证签名，不能假设已配置秒级 CDN 刷新。
+完整机器可读证据及签名 manifest 的两个准确源 SHA 见 [DEPLOYMENT_VERIFICATION.json](DEPLOYMENT_VERIFICATION.json)。
+
+仍缺的外部配置只有即时通知令牌：用户本人创建仅选 RSTONE_Data、Actions:write 的 fine-grained PAT，
+保存到两个源库的 `rstone-data-notify` environment Secret `DATA_DISPATCH_TOKEN`，再手动运行两个通知工作流。
+缺少时通知明确失败，手动和六小时定期数据发布已可用。没有把旧的广泛权限登录 token 复制到 Actions。
+
+本项目未修改 Flutter 客户端和 APK 构建流程，也没有构建 APK。上述真实客户端证据来自 Python 参考实现，
+Flutter 设备、业务界面和官方/用户数据存储层集成仍是独立客户端工作。

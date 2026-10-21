@@ -59,6 +59,13 @@ Git 按新增对象增量推送；Pages 自定义部署仍需要整站 artifact�
 历史默认保留 30 版、至少 7 天宽限，通过手动 Prune retained data history 工作流应用配置。
 
 公开代码仓库：[Mehael-Yeh/RSTONE_Data](https://github.com/Mehael-Yeh/RSTONE_Data)，发布代码分支为 `main`。
-当前交付完成本地实现、实际资料格式验证、模拟端到端验收及公开代码推送。
-生产 Secrets、Pages 公网 URL、上游通知模板安装和 Flutter 客户端集成仍需按手册配置/协调，
-代码公开和本地测试不代表真实数据分发已经上线。
+生产数据已上线：[latest.json](https://mehael-yeh.github.io/RSTONE_Data/latest.json)，
+首版 `sequence=1` / `2026.10.21.001` 包含 187 份资料、187 个对象（84,388 字节原始载荷）。
+Pages 和 GitHub raw 备用入口均已完整验证签名、对象和 CORS，地址见 [config/mirrors.json](config/mirrors.json)。
+真实联网参考客户端首次下载 187 个对象，再次同步实际对象请求为 0；没有构建 APK。
+
+签名、源只读密钥、Pages、受保护环境和定时发布均已配置。
+两个源库已安装即时通知工作流，仍需用户本人创建仅对本仓库 Actions: write 的受限令牌，
+存入两边的 `rstone-data-notify/DATA_DISPATCH_TOKEN` 才能启用即时通知；缺少时手动/定时发布仍正常。
+Flutter 应用运行时集成另按对接说明实施，现有 APK 尚未接入此协议。
+实际运行、公开验证和外部配置边界见 [docs/LIVE_DEPLOYMENT.md](docs/LIVE_DEPLOYMENT.md)。
