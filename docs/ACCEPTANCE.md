@@ -1,7 +1,7 @@
 # 实现验收与证据边界
 
 验收环境：Windows、Python 3.12.14、Dart 3.13.6 stable，2026-10-21。
-GitHub Actions 的 Ubuntu/Windows 矩阵已配置，尚未在新远程仓库执行；不以配置代替远程成功结果。
+GitHub Actions 的 Ubuntu/Windows 矩阵已配置；远程运行结果见公开仓库 Actions，以下本地记录不代替远程运行结果。
 预装 Dart 开发版分析器存在环境错误，已使用 SHA-256 校验过的官方独立稳定版复核，未更新现有 Flutter SDK。
 
 ## 可重现的测试
@@ -65,9 +65,12 @@ scripts/demo.py 使用模拟源和真实 Ed25519/HTTP 流程：首次客户端�
 | Phase 4 CI/Pages/镜像 | e7ebf02；45 tests passed，工作流 actionlint 通过 |
 | Phase 5 完整客户端参考、互通和文档 | 当前交付提交；65 Python + 13 Dart tests passed，详见交付说明和 reports/pytest.xml |
 
-## 尚待外部验收
+## 公开仓库与尚待外部验收
 
-- 创建并推送审核后的远程 RSTONE_Data，配置 Pages、受保护发布环境、私有源只读 token、签名私钥和可信公钥。
+公开代码仓库已创建并推送：[Mehael-Yeh/RSTONE_Data](https://github.com/Mehael-Yeh/RSTONE_Data)，默认分支 `main`。
+真实私有源内容未随代码推送，生产发布没有启用。
+
+- 配置 Pages、受保护发布环境、私有源只读 token、签名私钥和可信公钥。
 - 确认全部公开字段范围，设定真实首个兼容客户端 minAppVersion，再启用 PUBLIC_DATA_APPROVED。
 - 在两个源仓库协调安装通知模板，验证实际源 commit 更新触发数据发布且没有 APK 构建。
 - 在真实公开 HTTPS URL 检查完整对象、签名、CORS、两阶段切换和客户端真实联网/离线行为。

@@ -2,13 +2,14 @@
 
 ## 公开范围和外部配置
 
-代码仓库和两个私有源库分离。创建公开 `Mehael-Yeh/RSTONE_Data` 前审核 `SOURCE_AUDIT.md`，
+公开代码仓库：[Mehael-Yeh/RSTONE_Data](https://github.com/Mehael-Yeh/RSTONE_Data)，默认分支 `main`。
+代码仓库和两个私有源库分离。正式发布真实源数据前审核 `SOURCE_AUDIT.md`，
 确认工程师姓名、配方、供应商等原文字段均允许公开。对象、Git 历史、Actions 报告均不可视为保密存储。
 本项目不修改上游仓库的组织、权限或分支，不部署业务数据库，不创建账号系统。
 
-由仓库管理员完成以下配置（当前尚未执行）：
+代码仓库已创建并推送，生产数据发布尚未启用。仓库管理员按以下清单完成其余配置：
 
-1. 创建公开仓库，把审核后的发布代码推送到默认 `main` 分支。
+1. 已完成：创建公开仓库，把发布代码推送到默认 `main` 分支。
 2. Pages → Build and deployment → Source 选择 **GitHub Actions**。
 3. 创建/保护 `github-pages` environment，只允许默认分支运行；限制环境和工作流文件的修改权限。
    若要求全自动发布，不设置每次必须人工审核的 environment reviewer，使用分支保护和受信发布代码保证授权。
@@ -26,7 +27,7 @@
    发布代码所在默认分支应受保护；`distribution` 分支仅工作流可写，允许 workflow bot 正常 fast-forward push。
 8. 第一次手动运行 Publish RSTONE Data，验证报告、签名、公网对象、CORS 和 latest。
 
-管理员完成代码审核后可从项目根目录执行以下创建/推送命令（本次交付未执行）：
+首次建仓的创建/推送命令如下，当前仓库已完成，勿重复执行创建命令：
 
 ```text
 gh repo create Mehael-Yeh/RSTONE_Data --public --source . --remote origin

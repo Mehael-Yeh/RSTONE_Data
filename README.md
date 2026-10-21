@@ -58,6 +58,7 @@ Git 按新增对象增量推送；Pages 自定义部署仍需要整站 artifact�
 才发布 latest；pending 状态直到最终公开部署验证完成才清除。镜像复制同一签名与对象，不自行签发版本。
 历史默认保留 30 版、至少 7 天宽限，通过手动 Prune retained data history 工作流应用配置。
 
-当前交付完成本地实现、实际资料格式验证及模拟端到端验收。
-远程 RSTONE_Data、生产 Secrets、Pages 公网 URL、上游通知模板安装和 Flutter 客户端集成尚需按手册配置/协调，
-本地测试不代表已经上线。
+公开代码仓库：[Mehael-Yeh/RSTONE_Data](https://github.com/Mehael-Yeh/RSTONE_Data)，发布代码分支为 `main`。
+当前交付完成本地实现、实际资料格式验证、模拟端到端验收及公开代码推送。
+生产 Secrets、Pages 公网 URL、上游通知模板安装和 Flutter 客户端集成仍需按手册配置/协调，
+代码公开和本地测试不代表真实数据分发已经上线。
