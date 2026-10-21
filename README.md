@@ -54,7 +54,7 @@ state/ 不上传为 Pages 资源。只新增缺失 CAS 对象，完整清单引�
 Git 按新增对象增量推送；Pages 自定义部署仍需要整站 artifact，客户端日常只下载缺少的对象。
 `newObjects`/`uploadedBytes` 统计新增 CAS 对象和原始载荷，不冒充两次 Pages 站点 artifact 的实际传输流量。
 
-工作流支持手动、repository_dispatch 和每六小时兜底检查。对象/清单部署并从公网逐一验证后，
+工作流支持源库通知（workflow_dispatch）、手动、repository_dispatch 和每六小时兜底检查。对象/清单部署并从公网逐一验证后，
 才发布 latest；pending 状态直到最终公开部署验证完成才清除。镜像复制同一签名与对象，不自行签发版本。
 历史默认保留 30 版、至少 7 天宽限，通过手动 Prune retained data history 工作流应用配置。
 
@@ -64,8 +64,9 @@ Git 按新增对象增量推送；Pages 自定义部署仍需要整站 artifact�
 Pages 和 GitHub raw 备用入口均已完整验证签名、对象和 CORS，地址见 [config/mirrors.json](config/mirrors.json)。
 真实联网参考客户端首次下载 187 个对象，再次同步实际对象请求为 0；没有构建 APK。
 
-签名、源只读密钥、Pages、受保护环境和定时发布均已配置。
-两个源库已安装即时通知工作流，仍需用户本人创建仅对本仓库 Actions: write 的受限令牌，
-存入两边的 `rstone-data-notify/DATA_DISPATCH_TOKEN` 才能启用即时通知；缺少时手动/定时发布仍正常。
+签名、源只读密钥、Pages、受保护环境、定时发布和两源通知凭证均已配置。
+Rstone/master 和 RstoneTDS/main 的通知工作流都已实际唤醒发布器并成功完成；
+本次两条链路均识别出 187 份资料未变化，0 新对象、0 新增载荷，sequence 保持 1。
+通知令牌到期时需按部署手册轮换；手动/定时发布不依赖通知令牌。
 Flutter 应用运行时集成另按对接说明实施，现有 APK 尚未接入此协议。
 实际运行、公开验证和外部配置边界见 [docs/LIVE_DEPLOYMENT.md](docs/LIVE_DEPLOYMENT.md)。
