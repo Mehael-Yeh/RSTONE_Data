@@ -7,6 +7,8 @@
 
 - Pages 使用 GitHub Actions，HTTPS 已开启，baseUrl 为 `https://mehael-yeh.github.io/RSTONE_Data/`。
 - `github-pages` environment 只允许 `main`；不要求每次人工批准，以支持自动发布。
+- `data-operations` 只允许 main，回滚、异常删除批准和历史清理需 Mehael-Yeh 独立审核；该 gate 无 Secrets。
+  通知令牌仅 Actions:write，不能批准需要 Deployments:write 的审核接口。
 - `DATA_SIGNING_KEY_ID=production-2026`，私钥只存于 environment Secret，公钥见 `config/trusted_keys.json`。
 - `PUBLIC_DATA_APPROVED=true` 对应本次已授权的公开范围，包含工程师、配方、供应商等源字段。
 - Rstone/master 与 RstoneTDS/main 各有一枚独立的只读 deploy key；发布器不拥有源库写入凭证。

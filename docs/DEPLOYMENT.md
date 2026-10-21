@@ -30,6 +30,11 @@
    默认 token 权限保持 read，不能批准 PR。默认分支要求 PR，只有所有者可合并；distribution 禁止
    force push 和删除，工作流正常 fast-forward 写入。不要给通知凭证 Contents/Workflows 写权限。
 8. 第一次手动运行 Publish RSTONE Data，验证报告、签名、公网对象、CORS 和 latest。
+9. `data-operations` environment 只允许 main，required reviewer 为 Mehael-Yeh。该环境没有 Secrets。
+   仅回滚、非空 deletion_approval 和历史清理需要先经过这个审批任务；普通发布自动跳过该任务。
+   个人仓库允许所有者审核自己发起的操作。通知令牌只有 Actions:write，不能调用需要 Deployments:write
+   的审批 API，不能修改 environment 规则。通知令牌**不得授予 Deployments:write/Administration:write**。
+   参考 [部署审批权限](https://docs.github.com/en/rest/actions/workflow-runs#review-pending-deployments-for-a-workflow-run)。
 
 首次建仓的创建/推送命令如下，当前仓库已完成，勿重复执行创建命令：
 
@@ -83,7 +88,8 @@ GitHub schedule 可能延迟，不承诺准点。repository_dispatch 只作为�
 1. 在 GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens 创建令牌。
 2. Resource owner 选择 Mehael-Yeh，Only select repositories 只选 **RSTONE_Data**。
 3. Repository permissions 只授予 **Actions: Read and write**，其余保持默认 Metadata: read；
-   **不授予 Contents/Workflows 写权限**。指定到期时间并安排轮换。也可用相同权限的 GitHub App token。
+   **不授予 Contents、Workflows、Deployments、Administration 写权限**。指定到期时间并安排轮换。
+   也可用相同权限的 GitHub App token。
 4. 分别在 [Rstone environments](https://github.com/Mehael-Yeh/Rstone/settings/environments) 和
    [RstoneTDS environments](https://github.com/Mehael-Yeh/RstoneTDS/settings/environments) 的
    `rstone-data-notify` 保存 `DATA_DISPATCH_TOKEN`，然后手动运行各源库的 Notify RSTONE data publisher。

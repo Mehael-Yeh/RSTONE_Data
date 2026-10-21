@@ -17,7 +17,7 @@ python scripts/demo.py --output work/demo-new --report reports/demo.json
 Dart：在 examples/flutter_protocol 执行 `dart pub get --enforce-lockfile`、`dart analyze`、`dart test`。
 Python lint 与 Actions 校验分别使用 Ruff 0.17.1 和 actionlint 1.7.12；actionlint 二进制来自官方发布并核对 SHA-256。
 依赖 hash lock 安装已运行。测试仅在临时 Git 仓库、临时签名密钥和本地 HTTP 服务运行，不改动源仓库或构建 APK。
-最终验收：68 项 Python 测试、13 项 Dart 测试；Dart analyze、Ruff、3 个 Actions 工作流的 actionlint 均通过。
+最终验收：69 项 Python 测试、13 项 Dart 测试；Dart analyze、Ruff、3 个 Actions 工作流的 actionlint 均通过。
 GitHub 的 Ubuntu/Windows 与 Dart 矩阵实际通过，生产配置与公网证据见 LIVE_DEPLOYMENT.md。
 
 | 用户验收项 | 实际运行测试 |

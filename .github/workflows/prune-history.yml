@@ -7,7 +7,17 @@ concurrency:
   group: rstone-data-publication
   cancel-in-progress: false
 jobs:
+  authorize_operations:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: data-operations
+    permissions: {}
+    steps:
+      - name: Require separate owner approval before pruning history
+        run: echo 'History maintenance approved through the protected data-operations environment.'
   prune:
+    needs: authorize_operations
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 30

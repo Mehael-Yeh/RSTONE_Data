@@ -6,6 +6,11 @@
 手动运行 Publish RSTONE Data，或由源更新通知/每六小时扫描触发。
 不要把源通知接到 Flutter APK 工作流。代码或公钥变更走审核；不能用任意 PR 代码取得发布 Secrets。
 
+普通发布保持自动。传入 rollback_sequence、deletion_approval 或运行历史清理时，必须由所有者
+在 Actions 的 Review deployments 中批准 `data-operations`，之后才会启动有签名/发布权限的任务。
+通知令牌只授予 Actions:write，不能批准需要 Deployments:write 的审核接口；不要给该令牌额外部署权限。
+本地 CLI 仍需拥有私钥和精确删除批准，适用于受信操作员，不接受来自通知任务的生产私钥。
+
 报告计数：added、modified、deleted、unchanged 是逻辑路径对账；newObjects 是新增的唯一 CAS 对象数，
 uploadedBytes 是这些对象的原始字节之和，sourceCommits 是本次实际读取的 Git HEAD。
 Git 分发分支只推送新 blob。GitHub Pages 的两次完整站点 artifact 会重传已有资源，

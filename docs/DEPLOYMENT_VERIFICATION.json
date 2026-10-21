@@ -109,6 +109,13 @@
     "pendingUserCredential": true,
     "pollFallbackHours": 6
   },
+  "operatorControls": {
+    "environment": "data-operations",
+    "reviewer": "Mehael-Yeh",
+    "requiresApprovalFor": ["rollback_sequence", "deletion_approval", "prune-history"],
+    "approvalPermission": "Deployments:write",
+    "notificationTokenMayApprove": false
+  },
   "apkBuilt": false,
   "flutterClientIntegrated": false
 }

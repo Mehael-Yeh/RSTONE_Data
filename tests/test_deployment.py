@@ -162,6 +162,25 @@ def test_upstream_notification_only_dispatches_main_and_protects_source_secrets(
     assert not any("flutter" in str(s).lower() for s in notify["steps"])
 
 
+def test_operator_inputs_and_pruning_require_separate_owner_review():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    publish = yaml.load((root / ".github/workflows/publish-data.yml").read_text(), Loader=yaml.BaseLoader)
+    gate = publish["jobs"]["authorize_operations"]
+    assert "inputs.rollback_sequence != ''" in gate["if"]
+    assert "inputs.deletion_approval != ''" in gate["if"]
+    assert gate["environment"] == "data-operations" and gate["permissions"] == {}
+    job = publish["jobs"]["publish"]
+    assert job["needs"] == "authorize_operations"
+    assert "always() && !cancelled()" in job["if"]
+    assert "needs.authorize_operations.result == 'success'" in job["if"]
+    assert "needs.authorize_operations.result == 'skipped'" in job["if"]
+    prune = yaml.load((root / ".github/workflows/prune-history.yml").read_text(), Loader=yaml.BaseLoader)
+    assert prune["jobs"]["authorize_operations"]["environment"] == "data-operations"
+    assert prune["jobs"]["authorize_operations"]["permissions"] == {}
+    assert prune["jobs"]["prune"]["needs"] == "authorize_operations"
+
+
 def test_mirror_copies_signed_bytes_and_keeps_pointer_on_failure(store, sources, signing, tmp_path, serve):
     from rstone_data.mirrors import deploy_mirror
     first = collect(*sources)
