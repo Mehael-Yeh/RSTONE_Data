@@ -1,4 +1,4 @@
-# Copy into each PRIVATE upstream only after coordinated review.
+# Installed in the two private upstreams after configuration authorization.
 # For Rstone: master. For RstoneTDS: change the branch filter to main.
 name: Notify RSTONE data publisher
 on:
@@ -9,19 +9,22 @@ on:
       - '产品应用/**/*.md'
       - '产品配方/**/*.md'
       # RstoneTDS uses '*.TDS.md' instead of the three filters above.
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   notify:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: rstone-data-notify
     steps:
-      - name: Dispatch data publication only
+      - name: Dispatch data publication on reviewed main only
         env:
           GH_TOKEN: ${{ secrets.DATA_DISPATCH_TOKEN }}
-          SOURCE_REPO: ${{ github.repository }}
-          SOURCE_SHA: ${{ github.sha }}
         run: |
-          gh api repos/Mehael-Yeh/RSTONE_Data/dispatches \
-            -f event_type=rstone-data-changed \
-            -f "client_payload[repository]=$SOURCE_REPO" \
-            -f "client_payload[sha]=$SOURCE_SHA"
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'Configure DATA_DISPATCH_TOKEN with RSTONE_Data Actions:write only in rstone-data-notify.' >&2
+            exit 1
+          fi
+          gh workflow run publish-data.yml --repo Mehael-Yeh/RSTONE_Data --ref main

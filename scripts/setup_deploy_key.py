@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives.serialization import (
 from rstone_data.protocol import DataError, require
 
 
-def install_key(repository, secret_repository, environment, secret_name, title, *, write=False):
+def install_key(repository, secret_repository, environment, secret_name, title):
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository), "invalid repository")
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", secret_repository), "invalid Secret repository")
     require(re.fullmatch(r"[A-Z][A-Z0-9_]+", secret_name), "invalid Secret name")
@@ -33,7 +33,7 @@ def install_key(repository, secret_repository, environment, secret_name, title, 
     require(not any(item["title"] == title for item in existing), "deploy key title exists; reconcile before retrying")
     private = Ed25519PrivateKey.generate()
     public = private.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode()
-    payload = json.dumps({"title": title, "key": public, "read_only": not write}).encode()
+    payload = json.dumps({"title": title, "key": public, "read_only": True}).encode()
     installed = json.loads(run(["gh", "api", "--method", "POST", f"repos/{repository}/keys",
                                 "--input", "-"], data=payload))
     secret = private.private_bytes(Encoding.PEM, PrivateFormat.OpenSSH, NoEncryption())
@@ -43,7 +43,7 @@ def install_key(repository, secret_repository, environment, secret_name, title, 
         # A retry cannot recover the private key. Revoke the public half when Secret installation fails.
         run(["gh", "api", "--method", "DELETE", f"repos/{repository}/keys/{installed['id']}"])
         raise
-    return {"repository": repository, "deployKeyId": installed["id"], "readOnly": not write,
+    return {"repository": repository, "deployKeyId": installed["id"], "readOnly": True,
             "secretRepository": secret_repository, "environment": environment, "secretName": secret_name}
 
 
@@ -54,11 +54,10 @@ def main():
     parser.add_argument("--environment", required=True)
     parser.add_argument("--secret-name", required=True)
     parser.add_argument("--title", required=True)
-    parser.add_argument("--write", action="store_true", help="Notification-only target; restrict refs with rulesets FIRST")
     args = parser.parse_args()
     try:
         result = install_key(args.repository, args.secret_repository, args.environment,
-                             args.secret_name, args.title, write=args.write)
+                             args.secret_name, args.title)
         print(json.dumps(result))
     except (DataError, OSError, subprocess.TimeoutExpired) as error:
         parser.exit(1, str(error) if isinstance(error, DataError) else "Deploy key setup failed\n")

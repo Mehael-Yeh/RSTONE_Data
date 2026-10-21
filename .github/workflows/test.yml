@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   test:
-    if: github.ref != 'refs/heads/distribution' && !startsWith(github.ref, 'refs/heads/source-signal/')
+    if: github.ref != 'refs/heads/distribution'
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -24,7 +24,7 @@ jobs:
       - run: python scripts/generate_examples.py --check
       - run: python scripts/generate_casefold.py --check
   dart-protocol:
-    if: github.ref != 'refs/heads/distribution' && !startsWith(github.ref, 'refs/heads/source-signal/')
+    if: github.ref != 'refs/heads/distribution'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

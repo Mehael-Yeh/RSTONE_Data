@@ -27,9 +27,8 @@
 6. 审核实际发布范围后设置 environment variable `PUBLIC_DATA_APPROVED=true`。
    生产公钥已记录在 `config/trusted_keys.json`；未配置匹配私钥时生产失败，本地测试自己生成临时密钥。
 7. 给此仓库 GITHUB_TOKEN 开启 Contents: write、Pages: write、id-token: write（工作流中已最小化声明）。
-   默认 token 权限保持 read，不能批准 PR。默认分支要求 PR，只有所有者可合并；distribution 只允许
-   github-actions[bot] 直接更新，所有者通过 PR 修改。不为所有者设置 always bypass：deploy key
-   会继承创建者的此类例外。通知密钥不能直接更改生产代码、状态或标签。
+   默认 token 权限保持 read，不能批准 PR。默认分支要求 PR，只有所有者可合并；distribution 禁止
+   force push 和删除，工作流正常 fast-forward 写入。不要给通知凭证 Contents/Workflows 写权限。
 8. 第一次手动运行 Publish RSTONE Data，验证报告、签名、公网对象、CORS 和 latest。
 
 首次建仓的创建/推送命令如下，当前仓库已完成，勿重复执行创建命令：
@@ -72,28 +71,33 @@ GitHub schedule 可能延迟，不承诺准点。repository_dispatch 只作为�
 
 ## 跨源仓库通知
 
-已安装的通知基于 `examples/upstream-signal.yml.example`。Rstone 使用 `master` 和三个 Markdown
+已安装的通知基于 `examples/upstream-dispatch.yml.example`。Rstone 使用 `master` 和三个 Markdown
 目录过滤；RstoneTDS 使用 `main` 和根目录 `*.TDS.md` 过滤。也支持手动通知，用于连接验收。
 
-每个源库的 `rstone-data-notify` environment 只允许自己的默认分支访问。各保存独立的
-`RSTONE_DATA_SIGNAL_KEY`，对应公开数据仓库的 write deploy key。GitHub 层的写权限只授予该公开仓库，
-再用 active rulesets 保护生产 ref：main 必须通过 PR 且仅所有者能合并，distribution 仅发布 bot
-可直接写入，标签禁止写入。所有者的 bypass 仅为 pull_request，不能设置 always，否则其部署密钥也会越权。
-通知密钥可写公开仓库的开发分支（GitHub deploy key 不提供精确单 ref 授权），但无法合并 PR、
-直接更改生产分支或访问 API/私有源库；这些分支的代码不获得发布 environment Secrets。
-通知正常只更新 `source-signal/rstone`、`source-signal/tds`，不决定发布内容。
-禁止移除生产 ref 规则后仍保留通知密钥。通知工作流手动运行会先实际验证 main 拒绝写入，失败立即停止。
+每个源库的 `rstone-data-notify` environment 只允许自己的默认分支访问，Secret 名为
+`DATA_DISPATCH_TOKEN`。通知调用目标的 **workflow_dispatch**，固定 `publish-data.yml` 和 `main`，
+不传入回滚或删除批准参数，不读取或上传源内容。发布器自行读取两个固定的最新源分支。
 
-通知只推送一个以公开 main 文件树创建的提交，包含上游 commit SHA，没有私有源文件。
-无权限的 Receive upstream signal 工作流不 checkout、下载 artifact、恢复缓存或使用 environment。
-其成功触发 `workflow_run`；GitHub 在默认 main 执行发布器，发布器只读取固定的两个源分支，
-从不运行通知分支代码或使用其产物。发布私钥和源读取密钥仅对 main 的 github-pages environment 开放。
-参考 [workflow_run 默认分支与安全边界](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run)。
+一次性的外部凭证配置：
 
-若已有受限 App/PAT，可替换为 `examples/upstream-dispatch.yml.example` 的 repository_dispatch：
-`DATA_DISPATCH_TOKEN` 只授权目标 RSTONE_Data 的 Contents: write，不能复用私有源读取凭证。
-两种通知都不发 Flutter 工作流事件，不构建 APK。每六小时轮询在通知异常时仍可发现变化。
-deploy key 无自动到期，应定期轮换；撤销创建它的 OAuth 授权也可能撤销 deploy key，
+1. 在 GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens 创建令牌。
+2. Resource owner 选择 Mehael-Yeh，Only select repositories 只选 **RSTONE_Data**。
+3. Repository permissions 只授予 **Actions: Read and write**，其余保持默认 Metadata: read；
+   **不授予 Contents/Workflows 写权限**。指定到期时间并安排轮换。也可用相同权限的 GitHub App token。
+4. 分别在 [Rstone environments](https://github.com/Mehael-Yeh/Rstone/settings/environments) 和
+   [RstoneTDS environments](https://github.com/Mehael-Yeh/RstoneTDS/settings/environments) 的
+   `rstone-data-notify` 保存 `DATA_DISPATCH_TOKEN`，然后手动运行各源库的 Notify RSTONE data publisher。
+
+令牌由 GitHub 用户本人创建；当前 gh OAuth 登录不能通过公开 API 代建 fine-grained PAT。
+缺少令牌时通知任务明确失败，但数据仓库的手动发布和六小时兜底检查正常工作。
+参考 [workflow_dispatch 所需 Actions: write](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)。
+保留 repository_dispatch 类型 rstone-data-changed，供未来已有受限 App 的部署使用；该 API 需要
+Contents: write，因此当前默认通知不采用它。两种方式都不触发 Flutter 工作流。
+
+安装时曾实测 SSH 通知替代方案，发现 deploy key 会继承创建者规则例外，GitHub 内置发布 token
+也不能按普通用户 actor 绕过 distribution 限制。该方案已撤回：两枚通知 write key、Secret、信号分支和
+接收工作流均已删除，只保留实际需要的两枚**只读源密钥**。没有把个人账号的广泛权限 token 复制到 Actions。
+源只读 deploy key 无自动到期，应定期轮换；撤销创建它的 OAuth 授权也可能撤销密钥，
 见 [GitHub deploy keys](https://docs.github.com/en/rest/deploy-keys/deploy-keys)。
 
 ## 镜像合同
