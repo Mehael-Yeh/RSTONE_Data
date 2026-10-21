@@ -19,11 +19,20 @@
    用 `python scripts/setup_signing.py --repository Mehael-Yeh/RSTONE_Data --key-id production-2026`
    将私钥直接送入 GitHub Secrets，同时生成只含公钥的 config 文件变更。脚本不会把私钥写入文件或日志。
    审核并提交 `config/trusted_keys.json` 的公钥，再设置 environment variable `DATA_SIGNING_KEY_ID=production-2026`。
+   `DATA_SIGNING_SECRET_NAME` 初始可不设（默认 DATA_SIGNING_PRIVATE_KEY），轮换时选择独立的新 Secret，不能先覆盖活跃私钥。
 6. 审核实际发布范围后设置 environment variable `PUBLIC_DATA_APPROVED=true`。
    `config/trusted_keys.json` 初始为空是有意的：未配置密钥时生产失败，本地测试自己生成临时密钥。
 7. 给此仓库 GITHUB_TOKEN 开启 Contents: write、Pages: write、id-token: write（工作流中已最小化声明）。
    发布代码所在默认分支应受保护；`distribution` 分支仅工作流可写，允许 workflow bot 正常 fast-forward push。
 8. 第一次手动运行 Publish RSTONE Data，验证报告、签名、公网对象、CORS 和 latest。
+
+管理员完成代码审核后可从项目根目录执行以下创建/推送命令（本次交付未执行）：
+
+```text
+gh repo create Mehael-Yeh/RSTONE_Data --public --source . --remote origin
+git push -u origin HEAD:main
+gh repo edit Mehael-Yeh/RSTONE_Data --default-branch main
+```
 
 预期入口为 `https://Mehael-Yeh.github.io/RSTONE_Data/latest.json`；该地址是部署目标，**当前不是已验证上线地址**。
 自定义域名应在 Pages 设置中另行配置，HTTP 重定向不被校验器接受，填写最终 HTTPS baseUrl。
@@ -50,7 +59,8 @@
 Pages/CDN 部署不能提供全球边缘强一致性，客户端下载协议始终需要事务和重试。
 
 无变化运行不签发新版本、不写入新对象、不部署站点，报告本次观察到的两组 commit。
-单个源库空、预期目录缺失、无有效 TDS、签名无效、异常删除未批准都会失败。
+首次缺少任一类资料、整体空库、预期目录缺失、签名无效、异常删除未批准都会失败。
+已有版本有意清空某类资料需精确批准；Rstone 仍需保留预期目录的受跟踪占位文件。
 每 6 小时兜底检查（UTC 的 00:23、06:23、12:23、18:23，即北京时间 08:23、14:23、20:23、次日 02:23），
 GitHub schedule 可能延迟，不承诺准点。repository_dispatch 只作为通知，发布器重新读取固定分支，不信任 payload 提供的数据或命令。
 

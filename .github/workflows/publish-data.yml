@@ -52,9 +52,11 @@ jobs:
         working-directory: publisher
         run: python -m pip install --require-hashes -r requirements-ci.txt
       - name: Run protocol and publication tests
+        id: tests
         working-directory: publisher
         run: python -m pytest -q
       - name: Require publication scope approval
+        id: scope
         run: test "$PUBLIC_DATA_APPROVED" = true
       - name: Load durable distribution state
         id: state
@@ -62,6 +64,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python publisher/scripts/ci_state.py checkout --repository publisher --destination store
       - name: Checkout Rstone master
+        id: source_rstone
         if: steps.state.outputs.pending != 'true' && inputs.rollback_sequence == ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,6 +75,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
       - name: Checkout RstoneTDS main
+        id: source_tds
         if: steps.state.outputs.pending != 'true' && inputs.rollback_sequence == ''
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,7 +88,7 @@ jobs:
       - name: Validate and prepare or resume signed release
         id: prepare
         env:
-          DATA_SIGNING_PRIVATE_KEY: ${{ secrets.DATA_SIGNING_PRIVATE_KEY }}
+          DATA_SIGNING_PRIVATE_KEY: ${{ secrets[vars.DATA_SIGNING_SECRET_NAME || 'DATA_SIGNING_PRIVATE_KEY'] }}
           DATA_SIGNING_KEY_ID: ${{ vars.DATA_SIGNING_KEY_ID }}
           DATA_DELETION_APPROVAL: ${{ inputs.deletion_approval }}
           ROLLBACK_SEQUENCE: ${{ inputs.rollback_sequence }}
@@ -150,6 +154,23 @@ jobs:
           python publisher/scripts/data.py complete --store store --base-url "$PAGES_URL" \
             --require-cors --attempts 12 --delay 10 --report reports/published.json
           python publisher/scripts/ci_state.py checkpoint --store store --message 'data acknowledge public deployment'
+      - name: Record failures including source checkout or missing configuration
+        if: failure()
+        env:
+          REPORT_STEPS: ${{ toJSON(steps) }}
+        shell: bash
+        run: |
+          mkdir -p reports
+          python - <<'PY'
+          import json, os, pathlib
+          steps = json.loads(os.environ.get('REPORT_STEPS', '{}'))
+          report = {'status': 'failed', 'requiresRecoveryCheck': True,
+                    'runId': os.environ['GITHUB_RUN_ID'],
+                    'attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                    'steps': {k: {'outcome': v.get('outcome'), 'conclusion': v.get('conclusion')}
+                              for k, v in steps.items()}}
+          pathlib.Path('reports/failure.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+          PY
       - name: Retain structured success or failure reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

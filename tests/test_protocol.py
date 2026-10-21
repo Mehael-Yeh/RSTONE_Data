@@ -1,5 +1,4 @@
 import pytest
-
 from rstone_data.protocol import DataError, canonical_json, decode_json, logical_path, manifest_name
 
 
@@ -24,3 +23,10 @@ def test_nested_paths():
 def test_reject_duplicate_json():
     with pytest.raises(DataError):
         decode_json(b'{"sequence":1,"sequence":2}')
+
+
+def test_reject_excessive_json_nesting_and_invalid_unicode():
+    with pytest.raises(DataError):
+        decode_json(b"[" * 2000 + b"0" + b"]" * 2000)
+    with pytest.raises(DataError):
+        decode_json(b'{"path":"\\ud800"}')

@@ -7,7 +7,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .build import changes, check_deletions, inventory, make_manifest, mapping_digest
-from .protocol import DataError, canonical_json, decode_json, manifest_name, require, sha256, validate_manifest
+from .protocol import (
+    DataError,
+    canonical_json,
+    decode_json,
+    manifest_name,
+    require,
+    sha256,
+    validate_manifest,
+)
 from .signing import verify_release
 from .sources import Snapshot, validate_markdown
 from .storage import ReleaseLock, atomic_write, immutable_write, safe_file

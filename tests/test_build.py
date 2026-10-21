@@ -1,7 +1,5 @@
-from pathlib import Path
 
 import pytest
-
 from conftest import commit_all
 from rstone_data.build import changes, check_deletions, deletion_approval, inventory, mapping_digest
 from rstone_data.protocol import DataError, sha256
@@ -81,3 +79,29 @@ def test_reference_warning_keeps_application(sources):
     snapshot = collect(rstone, tds)
     assert "产品应用/方案.md" in snapshot.files
     assert any(w["code"] == "unresolved_product_reference" for w in snapshot.warnings)
+
+
+def test_wrong_source_repository_rejected(sources):
+    from conftest import run_git
+    run_git(sources[0], "remote", "set-url", "origin", "https://github.com/other/repo.git")
+    with pytest.raises(DataError, match="source origin"):
+        collect(*sources)
+
+
+def test_fetch_failure_has_no_fallback(tmp_path, monkeypatch):
+    import subprocess
+
+    from rstone_data.sources import fetch_sources
+    def fail(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, ["git", "clone"])
+    monkeypatch.setattr(subprocess, "run", fail)
+    with pytest.raises(DataError, match="source fetch failed"):
+        fetch_sources(tmp_path / "fetched")
+
+
+def test_utf8_bom_is_validated_without_changing_bytes(sources):
+    rstone, tds = sources
+    original = (rstone / "产品列表/RS100.md").read_bytes()
+    (rstone / "产品列表/RS100.md").write_bytes(b"\xef\xbb\xbf" + original)
+    commit_all(rstone)
+    assert collect(rstone, tds).files["产品列表/RS100.md"] == b"\xef\xbb\xbf" + original

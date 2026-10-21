@@ -1,0 +1,63 @@
+name: Prune retained data history
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rstone-data-publication
+  cancel-in-progress: false
+jobs:
+  prune:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: publisher
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install hash-locked dependencies
+        working-directory: publisher
+        run: python -m pip install --require-hashes -r requirements.txt
+      - name: Load state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python publisher/scripts/ci_state.py checkout --repository publisher --destination store
+      - name: Validate all retained releases before applying configured retention and grace period
+        run: python publisher/scripts/data.py gc --store store --apply --require-no-pending --report reports/gc.json
+      - name: Checkpoint pruning
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python publisher/scripts/ci_state.py checkpoint --store store --message 'data prune unreferenced historical objects'
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: rstone-pruned
+          path: store/public
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: rstone-pruned
+      - name: Verify current version after maintenance
+        env:
+          PAGES_URL: ${{ steps.deploy.outputs.page_url }}
+        run: python publisher/scripts/data.py verify --base-url "$PAGES_URL" --require-cors --attempts 12 --delay 10 --report reports/gc-verify.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: data-retention-report
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14

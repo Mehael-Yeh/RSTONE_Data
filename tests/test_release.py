@@ -3,12 +3,10 @@ import copy
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
-
 from conftest import commit_all
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 from rstone_data.build import inventory
-from rstone_data.protocol import DataError, canonical_json, decode_json, sha256
-from rstone_data.release import pointer_for
+from rstone_data.protocol import DataError, decode_json, sha256
 from rstone_data.signing import Signer, verify_release
 from rstone_data.sources import Snapshot, collect
 
@@ -123,7 +121,7 @@ def test_bulk_deletion_and_empty_are_never_silently_published(store, sources, si
     store.prepare(second, signing[0], public_scope_approved=True, approval=approval)
     store.promote()
     empty = Snapshot({}, first.commits)
-    with pytest.raises(DataError, match="empty data namespace"):
+    with pytest.raises(DataError, match="empty database"):
         store.prepare(empty, signing[0], public_scope_approved=True, approval=approval)
     assert store.read()["sequence"] == 2
 
@@ -198,3 +196,36 @@ def test_immutable_object_conflict(store, sources, signing):
     with pytest.raises(DataError, match="immutable"):
         publish(store, first, signing[0])
     assert store.latest_bytes() is None
+
+
+def test_intentional_namespace_empty_requires_exact_approval(store, sources, signing):
+    first = collect(*sources)
+    publish(store, first, signing[0])
+    rstone, tds = sources
+    (rstone / "产品应用/方案.md").unlink()
+    (rstone / "产品应用/.gitkeep").touch()
+    commit_all(rstone)
+    second = collect(rstone, tds)
+    with pytest.raises(DataError, match="bulk deletion") as error:
+        store.prepare(second, signing[0], public_scope_approved=True)
+    approval = str(error.value).split("required: ")[1]
+    store.prepare(second, signing[0], public_scope_approved=True, approval=approval)
+    store.promote()
+    assert not any(r["path"].startswith("产品应用/") for r in store.read()["files"])
+    assert store.read()["sequence"] == 2
+
+
+def test_gc_protects_both_current_and_pending(store, sources, signing):
+    first = collect(*sources)
+    publish(store, first, signing[0])
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nversion 2\n")
+    publish(store, second, signing[0])
+    third = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nversion 3\n")
+    store.prepare(third, signing[0], public_scope_approved=True)
+    plan = store.gc(retain=1, grace_days=0, apply=True,
+                    now=datetime.now(timezone.utc) + timedelta(days=1))
+    assert plan["protectedSequences"] == [2, 3]
+    assert store.read()["sequence"] == 2
+    assert store.read(store.pending()["pointer"])["sequence"] == 3
+    store.promote()
+    assert store.read()["sequence"] == 3

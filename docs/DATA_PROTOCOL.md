@@ -30,6 +30,8 @@ publishedAt（UTC `YYYY-MM-DDTHH:mm:ssZ`）、keyId、sourceCommits、files。
 sourceCommits 精确包含 `Mehael-Yeh/Rstone` 和 `Mehael-Yeh/RstoneTDS` 两个键，对应 40 位小写 Git SHA。
 每个文件记录 path、sha256、size 和可选 contentType（默认 `text/markdown; charset=utf-8`）。
 完整可运行示例在 `examples/distribution/`，包含真实可验证的模拟对象和签名，不包含私有源内容。
+可直接读取 [完整 Manifest](../examples/distribution/manifests/000002.json)、
+[latest](../examples/distribution/latest.json) 和 [示例公钥](../examples/trusted_keys.json)。
 
 files 是当前全部有效文件，按 path 的 UTF-8 字节升序排列，不是补丁。空清单非法。
 大小是原始字节数（1..16 MiB），对象哈希基于原始字节，保留源 LF/CRLF、BOM、正文空白。
@@ -54,7 +56,9 @@ path 使用 `/`，UTF-8 且已为 Unicode NFC，不主动改写名称。根目�
 签名对象是 manifest JSON 文件**全部原始字节**（包括最后 LF）；纯 Ed25519，不先做 SHA256 再签名，不使用 Ed25519ph。
 独立 `.sig`：RFC4648 标准 Base64、带 `=` padding、无折行，最后单个 ASCII LF；解码恰为 64 字节。
 公钥：32 字节 Ed25519 raw public key 的标准 Base64；keyId 来自应用预装的可信键表。
-生产私钥：32 字节 seed 的 Base64，只在受保护 Actions environment Secret `DATA_SIGNING_PRIVATE_KEY` 中保存。
+仓库公钥表配置为 `{"keys":{"production-2026":"<Base64 raw public key>"}}`；这是构建/运维输入，不是网络信任根更新机制。
+生产私钥：32 字节 seed 的 Base64，只在受保护 Actions environment Secret 中保存，初始名称 `DATA_SIGNING_PRIVATE_KEY`。
+轮换可用独立的新 Secret，由受保护的 DATA_SIGNING_SECRET_NAME 选择；脚本环境变量始终为 DATA_SIGNING_PRIVATE_KEY。
 不得提交私钥，不得把私钥放入 Flutter，不得把网络下载的公钥直接当信任锚。
 发布器必须证明私钥与受信 keyId 公钥匹配。缺失、错误密钥均失败；本地测试临时生成独立密钥，无不签名的正式发布模式。
 
@@ -85,10 +89,17 @@ CDN 各边缘节点不能全局原子切换；客户端事务和跨镜像重试�
 候选和上次正式状态持久化到专用 distribution 分支，失败重跑先恢复 pending，禁止覆盖 pending 的不可变清单。
 新的 sequence 大于所有已保留/预留的 sequence，中断可留下序号空洞。
 
+发布器另输出结构化运行摘要（非签名的运维报告，不供客户端做信任判断）：status、sequence、dataVersion、
+added/modified/deleted/unchanged 路径数量、newObjects、uploadedBytes、sourceCommits、mappingSha256、warnings 和 changes 路径数组。
+newObjects/ uploadedBytes 指新增唯一 CAS 对象及其原始载荷；不包括 Pages 整站 artifact、Git 压缩封装或 HTTP 开销。
+无变化为 unchanged，不产生新 manifest；失败为 failed 且提供不包含凭证内容的 error。
+
 回滚是新发布：文件映射及 sourceCommits 使用选定历史已验签状态，使用新的 sequence/dataVersion/publishedAt/keyId，
 记录 rollbackOf 历史序号（可选扩展）。不降低序号、不覆盖旧清单。回滚允许切回旧 minAppVersion/schema。
 正常发布的异常删除需精确匹配当前基线 sequence 和目标文件映射 SHA256 的批准，避免批准失效后误用。
-空库及缺失任一预期源目录不允许批准绕过。
+完整空库及缺失任一预期源目录不允许批准绕过。首次发布要求四类资料均非空；
+之后有意清空某类资料可用精确批准，Rstone 的预期目录需保留受跟踪占位文件（如 `.gitkeep`）。
+获取失败与成功读取到零文件是不同状态，前者始终失败。移出目录白名单等价于从公开库删除，不扩大公开范围。
 
 ## 8. 保留、ZIP、缓存
 
@@ -98,6 +109,9 @@ CDN 各边缘节点不能全局原子切换；客户端事务和跨镜像重试�
 Git 历史仍保存曾发布的内容；GC 不等于撤回公开数据。
 ZIP 为辅助资源，包含 manifest、签名和按逻辑路径放置的原始文件；导入必须逐文件按签名 manifest 校验，
 拒绝多余条目/重复条目/路径穿越，不能把 ZIP 完整性当作真实性。日常更新不用 ZIP。
+ZIP 条目精确为 `metadata/manifest.json`、`metadata/manifest.sig` 和每个 `files/<逻辑path>`；
+不包含 latest、不包含对象哈希目录、不添加目录条目。总解压上限 544 MiB，其中文件正文合计最多 512 MiB、
+manifest 最多 32 MiB、签名最多 512 字节；不接受软链接或加密条目。导入仍检查 minAppVersion 和本地最高已接受序号。
 
 对象/清单建议 `Cache-Control: public,max-age=31536000,immutable`，latest 建议 `max-age=60,must-revalidate`。
 Pages 不能通过仓库文件任意设置 HTTP 响应头，不能依赖 `_headers` 在 Pages 生效；客户端重验证/nonce 和内容校验是必需的。

@@ -53,6 +53,7 @@ def validate_markdown(path, raw):
     except UnicodeError as exc:
         raise DataError(f"invalid UTF-8: {path}") from exc
     require("\x00" not in text, f"NUL in Markdown: {path}")
+    require(not text.startswith("version https://git-lfs.github.com/spec/v1"), f"unresolved Git LFS pointer: {path}")
     require(not SENSITIVE_CONTENT.search(text), f"sensitive content detected: {path}")
     lines = text.splitlines()
     required = path.split("/")[0] in ("产品列表", "产品应用")
@@ -108,6 +109,10 @@ def fetch_sources(directory):
 
 def _blobs(repo, tds):
     require(Path(repo).is_dir(), "missing source repository")
+    expected = SOURCE_SPECS[1 if tds else 0][0].lower()
+    origin = git(repo, "remote", "get-url", "origin").decode("utf-8").strip().lower().removesuffix(".git")
+    require(origin in (f"https://github.com/{expected}", f"git@github.com:{expected}"),
+            "source origin does not match the expected private repository")
     commit = git(repo, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
     require(COMMIT.fullmatch(commit), "invalid source HEAD")
     tree = git(repo, "ls-tree", "-rz", "--full-tree", commit)
@@ -140,7 +145,8 @@ def _blobs(repo, tds):
             selected.append((logical, oid))
     if not tds:
         require(set(ROOTS[:3]) <= directories, "expected source data directory missing")
-    require(selected, "source has no valid allowlisted files")
+    if not selected:
+        return commit, {}
     request = "".join(f"{oid}\n" for _, oid in selected).encode("ascii")
     sizes = git(repo, "cat-file", "--batch-check", input_bytes=request).splitlines()
     require(len(sizes) == len(selected), "incomplete source blob metadata")
@@ -172,8 +178,10 @@ def collect(rstone, tds):
     require(len({p.casefold() for p in files}) == len(files), "conflicting paths")
     for path, raw in files.items():
         texts[path] = validate_markdown(path, raw)
+    require(files, "empty database")
     for root in ROOTS:
-        require(any(p.startswith(root + "/") for p in files), f"empty data namespace: {root}")
+        if not any(p.startswith(root + "/") for p in files):
+            warnings.append({"path": root, "code": "empty_namespace_requires_deletion_review"})
     known = {Path(p).stem.casefold() for p in files if not p.startswith("产品应用/")}
     for path, text in texts.items():
         if "工程师:" in text or re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", text):

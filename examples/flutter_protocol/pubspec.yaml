@@ -1,0 +1,10 @@
+name: rstone_data_protocol_example
+description: Standalone RSTONE protocol interoperability example, without a Flutter build.
+publish_to: none
+environment:
+  sdk: '>=3.5.0 <4.0.0'
+dependencies:
+  cryptography: 2.9.0
+  unorm_dart: 0.3.3
+dev_dependencies:
+  test: 1.25.15

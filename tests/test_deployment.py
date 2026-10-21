@@ -1,53 +1,16 @@
 import base64
-import contextlib
-import functools
-import http.server
 import shutil
-import threading
-from urllib.parse import urlsplit
 
 import pytest
 import yaml
-from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
-
 from conftest import run_git
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 from rstone_data.cli import main
 from rstone_data.protocol import DataError, canonical_json, decode_json, require, sha256
 from rstone_data.release import Store
 from rstone_data.sources import collect
 from rstone_data.transport import fetch_release
 from test_release import changed, publish
-
-
-@pytest.fixture
-def serve():
-    @contextlib.contextmanager
-    def server(directory, cors=True, faults=None):
-        class Handler(http.server.SimpleHTTPRequestHandler):
-            def log_message(self, *_):
-                pass
-
-            def end_headers(self):
-                if cors:
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                super().end_headers()
-
-            def do_GET(self):
-                if urlsplit(self.path).path in (faults or set()):
-                    self.send_error(404)
-                else:
-                    super().do_GET()
-
-        service = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(directory)))
-        thread = threading.Thread(target=service.serve_forever, daemon=True)
-        thread.start()
-        try:
-            yield "http://127.0.0.1:" + str(service.server_port)
-        finally:
-            service.shutdown()
-            service.server_close()
-            thread.join(timeout=5)
-    return server
 
 
 def test_staging_verification_pointer_last_and_final_deploy_recovery(store, sources, signing, tmp_path, serve):
@@ -198,3 +161,13 @@ def test_mirror_copies_signed_bytes_and_keeps_pointer_on_failure(store, sources,
             deploy_mirror(store.root, mirror, base, signing[1], allow_local_http=True)
     assert (mirror / "latest.json").read_bytes() == old
     assert (mirror / "manifests/000002.json").read_bytes() == (store.public / "manifests/000002.json").read_bytes()
+
+
+def test_standalone_signed_http_demo(tmp_path):
+    from demo import demonstrate
+    report = demonstrate(tmp_path / "demo")
+    assert report["officialPublication"] is False and report["apkBuilt"] is False
+    assert report["skipVersionsSync"]["downloadedObjects"] == 1
+    assert report["rollbackSync"]["downloadedObjects"] == 0
+    assert report["releasedObjectCounts"] == [5, 1, 0, 0, 0]
+    assert report["unchangedStatus"] == "unchanged"

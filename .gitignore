@@ -11,3 +11,5 @@ reports/
 *.key
 *.pem
 .env*
+.dart_tool/
+.packages

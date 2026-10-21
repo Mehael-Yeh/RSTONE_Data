@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from datetime import datetime
 from pathlib import PurePosixPath
 
 PROTOCOL = 1
@@ -44,9 +45,20 @@ def _unique_pairs(pairs):
 
 def decode_json(data):
     try:
-        return json.loads(data.decode("utf-8"), object_pairs_hook=_unique_pairs,
-                          parse_constant=lambda _: (_ for _ in ()).throw(DataError("nonfinite JSON")))
-    except (UnicodeError, ValueError) as exc:
+        value = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_pairs,
+                           parse_constant=lambda _: (_ for _ in ()).throw(DataError("nonfinite JSON")))
+        stack = [(value, 0)]
+        while stack:
+            item, depth = stack.pop()
+            require(depth <= 64, "JSON nesting limit exceeded")
+            if isinstance(item, dict):
+                stack.extend((child, depth + 1) for pair in item.items() for child in pair)
+            elif isinstance(item, list):
+                stack.extend((child, depth + 1) for child in item)
+            elif isinstance(item, str):
+                require(not any(0xD800 <= ord(c) <= 0xDFFF for c in item), "unpaired JSON surrogate")
+        return value
+    except (UnicodeError, ValueError, RecursionError) as exc:
         raise DataError("invalid UTF-8 JSON") from exc
 
 
@@ -55,7 +67,11 @@ def integer(value, minimum=0):
 
 
 def logical_path(path):
-    require(isinstance(path, str) and 0 < len(path.encode("utf-8")) <= 1024, "invalid path")
+    require(isinstance(path, str), "invalid path")
+    try:
+        require(0 < len(path.encode("utf-8")) <= 1024, "invalid path")
+    except UnicodeError as exc:
+        raise DataError("invalid Unicode path") from exc
     require(path == unicodedata.normalize("NFC", path), "path must already be NFC")
     require(not path.startswith("/") and "\\" not in path, "absolute or non-POSIX path")
     parts = path.split("/")
@@ -95,6 +111,10 @@ def validate_manifest(manifest):
     require(isinstance(manifest.get("publishedAt"), str) and
             re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
                          manifest["publishedAt"]), "invalid publishedAt")
+    try:
+        datetime.strptime(manifest["publishedAt"], "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as exc:
+        raise DataError("invalid publishedAt calendar value") from exc
     require(isinstance(manifest.get("keyId"), str) and
             re.fullmatch(r"[A-Za-z0-9_-]{1,64}", manifest["keyId"]), "invalid keyId")
     commits = manifest.get("sourceCommits")
@@ -119,6 +139,7 @@ def validate_manifest(manifest):
         paths.append(path)
     require(paths == sorted(paths, key=lambda p: p.encode("utf-8")), "manifest files not sorted")
     require(len({p.casefold() for p in paths}) == len(paths), "duplicate or case-colliding paths")
+    require(sum(r["size"] for r in files) <= 512 * 1024 * 1024, "dataset size limit exceeded")
     return manifest
 
 

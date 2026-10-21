@@ -20,7 +20,7 @@ PROJECT = Path(__file__).resolve().parents[2]
 def parser():
     result = argparse.ArgumentParser(description="RSTONE signed data publication and synchronization")
     commands = result.add_subparsers(dest="command", required=True)
-    for name in ("fetch", "audit", "prepare", "promote", "complete", "verify", "package", "gc"):
+    for name in ("fetch", "audit", "prepare", "promote", "complete", "verify", "package", "gc", "sync", "import"):
         sub = commands.add_parser(name)
         sub.add_argument("--keys", type=Path, default=PROJECT / "config/trusted_keys.json")
         sub.add_argument("--config", type=Path, default=PROJECT / "config/release.json")
@@ -55,6 +55,15 @@ def parser():
             sub.add_argument("--retain", type=int)
             sub.add_argument("--grace-days", type=int)
             sub.add_argument("--apply", action="store_true")
+            sub.add_argument("--require-no-pending", action="store_true")
+        if name in ("sync", "import"):
+            sub.add_argument("--cache", type=Path, required=True)
+            sub.add_argument("--app-version", default="1.0.0")
+        if name == "sync":
+            sub.add_argument("--base-url", action="append", required=True)
+            sub.add_argument("--allow-local-http", action="store_true")
+        if name == "import":
+            sub.add_argument("--package", type=Path, required=True)
     return result
 
 
@@ -85,6 +94,12 @@ def execute(args):
                 "mappingSha256": mapping_digest(inventory(snapshot.files)), "warnings": snapshot.warnings}
     keys = validate_keys(decode_json(args.keys.read_bytes())["keys"])
     config = decode_json(args.config.read_bytes())
+    if args.command in ("sync", "import"):
+        from .client import import_package, synchronize
+        if args.command == "import":
+            return import_package(args.package, args.cache, keys, app_version=args.app_version)
+        return synchronize(args.base_url, args.cache, keys, app_version=args.app_version,
+                           allow_local_http=args.allow_local_http)
     store = Store(args.store, keys) if args.store else None
     if args.command == "prepare":
         signer = Signer.load(args.key_id, os.environ.get("DATA_SIGNING_PRIVATE_KEY"), keys)
@@ -114,6 +129,7 @@ def execute(args):
     if args.command == "package":
         return {"status": "packaged", "path": store.package(args.sequence)}
     if args.command == "gc":
+        require(not args.require_no_pending or store.pending() is None, "finish pending publication before maintenance")
         return store.gc(config["retainVersions"] if args.retain is None else args.retain,
                         config["gcGraceDays"] if args.grace_days is None else args.grace_days, args.apply)
     raise DataError("unsupported command")

@@ -30,9 +30,10 @@ def deletion_approval(previous, records):
 
 def check_deletions(previous, records, maximum=0.25, approval=None):
     require(isinstance(maximum, (int, float)) and 0 <= maximum < 1, "invalid deletion threshold")
-    for root in ROOTS:
-        require(any(r["path"].startswith(root + "/") for r in records), f"empty data namespace: {root}")
+    require(records, "empty database cannot be approved")
     if not previous:
+        for root in ROOTS:
+            require(any(r["path"].startswith(root + "/") for r in records), f"initial data namespace empty: {root}")
         return
     old = {r["path"]: r["sha256"] for r in previous["files"]}
     new = {r["path"]: r["sha256"] for r in records}
