@@ -18,7 +18,7 @@ def test_staging_verification_pointer_last_and_final_deploy_recovery(store, sour
     publish(store, first, signing[0])
     remote = tmp_path / "remote"
     shutil.copytree(store.public, remote)
-    second = changed(first, "产品列表/RS300.md", b"---\ntags: []\n---\nnew\n")
+    second = changed(first, "产品列表/RS300.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nnew\n")
     store.prepare(second, signing[0], public_scope_approved=True)
     shutil.copytree(store.public, remote, dirs_exist_ok=True)
     new_obj = "objects/" + sha256(second.files["产品列表/RS300.md"])
@@ -194,7 +194,7 @@ def test_mirror_copies_signed_bytes_and_keeps_pointer_on_failure(store, sources,
         result = deploy_mirror(store.root, mirror, base, signing[1], allow_local_http=True)
         assert result["newObjects"] == 0
     old = (mirror / "latest.json").read_bytes()
-    second = changed(first, "产品列表/RS300.md", b"---\ntags: []\n---\nnew\n")
+    second = changed(first, "产品列表/RS300.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nnew\n")
     publish(store, second, signing[0])
     faults = {"/objects/" + sha256(second.files["产品列表/RS300.md"])}
     with serve(mirror, faults=faults) as base:

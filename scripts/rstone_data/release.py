@@ -19,6 +19,7 @@ from .protocol import (
 from .signing import verify_release
 from .price_gate import check_tree, check_payload
 from .sources import Snapshot, validate_markdown
+from .quality_gate import validate_snapshot
 from .storage import ReleaseLock, atomic_write, immutable_write, safe_file
 
 
@@ -86,6 +87,23 @@ class Store:
         return sorted({int(p.stem) for p in directory.iterdir()
                        if re.fullmatch(r"[0-9]{6,}\.(json|sig)", p.name)})
 
+    def _snapshot(self, manifest):
+        return Snapshot({r["path"]: self.object(r) for r in manifest["files"]},
+                        manifest["sourceCommits"])
+
+    def _release_quality(self, manifest):
+        # Only an earlier signed release can grandfather historical broken links.
+        # Never compare a pending/restored release against itself.
+        earlier = [seq for seq in self.sequences() if seq < manifest["sequence"]]
+        baseline = None
+        if earlier:
+            raw = safe_file(self.public, manifest_name(max(earlier))).read_bytes()
+            previous = validate_manifest(decode_json(raw))
+            self.read(pointer_for(previous, raw))
+            baseline = self._snapshot(previous)
+        return validate_snapshot(self._snapshot(manifest), baseline,
+                                 identity_baseline=manifest.get("rollbackOf") is None)
+
     def prepare(self, snapshot, signer, *, public_scope_approved=False, min_app_version="1.0.0",
                 max_deletion_fraction=0.25, approval=None, now=None, rollback_of=None, failpoint=None):
         require(public_scope_approved, "public data scope must be explicitly approved before publishing")
@@ -97,12 +115,15 @@ class Store:
         with ReleaseLock(self.root):
             pending = self.pending()
             if pending:
-                self.read(pending["pointer"])
-                return dict(pending["summary"], status="pending", resumed=True)
+                manifest = self.read(pending["pointer"])
+                quality = self._release_quality(manifest)
+                return dict(pending["summary"], qualityGate=quality, status="pending", resumed=True)
             previous = self.read()
             # Even programmatic ingestion is validated. Rollback data also passes present-day secret checks.
             for path, raw in snapshot.files.items():
                 validate_markdown(path, raw)
+            quality = validate_snapshot(snapshot, self._snapshot(previous) if previous else None,
+                                        identity_baseline=rollback_of is None)
             records = inventory(snapshot.files)
             check_deletions(previous, records, max_deletion_fraction,
                             approval if rollback_of is None else
@@ -112,6 +133,7 @@ class Store:
                        "deleted": len(diff["deleted"]), "unchanged": len(diff["unchanged"]),
                        "newObjects": 0, "uploadedBytes": 0, "sourceCommits": snapshot.commits,
                        "mappingSha256": mapping_digest(records), "warnings": snapshot.warnings,
+                       "qualityGate": quality,
                        "changes": diff}
             if previous and not (summary["added"] or summary["modified"] or summary["deleted"]):
                 return dict(summary, status="unchanged", sequence=previous["sequence"])
@@ -148,7 +170,7 @@ class Store:
             pending = self.pending()
             require(pending is not None, "no pending release")
             pointer = pending["pointer"]
-            self.read(pointer)
+            self._release_quality(self.read(pointer))
             new_latest = canonical_json(pointer)
             current = self.latest_bytes()
             already_committed = current == new_latest
@@ -172,7 +194,7 @@ class Store:
         with ReleaseLock(self.root):
             pending = self.pending()
             require(pending is not None, "no pending deployment to acknowledge")
-            self.read(pending["pointer"])
+            self._release_quality(self.read(pending["pointer"]))
             require(self.latest_bytes() == canonical_json(pending["pointer"]), "local latest not promoted")
             remote_verifier(pending["pointer"])
             (self.state / "pending.json").unlink()
@@ -192,7 +214,7 @@ class Store:
         raw = path.read_bytes()
         manifest = validate_manifest(decode_json(raw))
         pointer = pointer_for(manifest, raw)
-        self.read(pointer)
+        self._release_quality(self.read(pointer))
         entries = {"metadata/manifest.json": raw,
                    "metadata/manifest.sig": safe_file(self.public, pointer["signaturePath"]).read_bytes()}
         entries.update({"files/" + r["path"]: self.object(r) for r in manifest["files"]})
