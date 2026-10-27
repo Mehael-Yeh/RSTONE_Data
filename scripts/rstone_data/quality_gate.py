@@ -41,6 +41,7 @@ FIRST_TAGS = ("水性", "油性", "粉末")
 SECOND_TAGS = ("UV", "PU", "PUD", "双固化", "聚烯烃")
 FUNCTIONALITY_TAG = re.compile(r"^(\d+(?:\.\d+)?)官$")
 FUNCTIONALITY_FIELDS = ("官能度",)
+PLAIN_NUMBER = re.compile(r"\d+(?:\.\d+)?")
 NUMERIC_FIELDS = ("固含", "羟值", "官能度", "硬度", "光泽", "水接触角")
 VISCOSITY_FIELD = "粘度"
 TECHNICAL_FIELDS = NUMERIC_FIELDS + (VISCOSITY_FIELD,)
@@ -333,9 +334,19 @@ def _safe_tag(tag: str) -> str:
 
 
 def _functionality(value) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    """Functionality from a numeric scalar, quoted or not.
+
+    sources.validate_markdown() and _typed_violations() accept a quoted scalar
+    such as ``官能度: "6"``, so it must be comparable with the 3官 tag; tolerance
+    or inequality spellings stay unverifiable rather than silently conflicting.
+    """
+    if isinstance(value, bool):
         return None
-    return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and PLAIN_NUMBER.fullmatch(value.strip()):
+        return float(value.strip())
+    return None
 
 
 def _numeric(value) -> bool:

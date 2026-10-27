@@ -245,6 +245,19 @@ def test_tag_functionality_conflict_rejected(tmp_path):
     assert "tag-field-conflict" in categories(run(root), "tag_field")
 
 
+def test_quoted_functionality_value_conflict_rejected(tmp_path):
+    """官能度: "6" is a quoted scalar the ingestion still accepts, so it must be compared."""
+    root = corpus(tmp_path, {"RS100": product(tags=("水性", "UV", "3官"),
+                                             fields={**DEFAULT_FIELDS, "官能度": '"6"'})})
+    assert "tag-field-conflict" in categories(run(root), "tag_field")
+
+
+def test_quoted_functionality_value_consistent_passes(tmp_path):
+    root = corpus(tmp_path, {"RS100": product(tags=("水性", "UV", "3官"),
+                                             fields={**DEFAULT_FIELDS, "官能度": '"3"'})})
+    assert run(root).check("tag_field")["ok"]
+
+
 def test_tag_functionality_without_value_is_a_backfill_review(tmp_path):
     """A tag carrying the only value is missing data, not a contradiction."""
     root = corpus(tmp_path, {"RS100": product(tags=("水性", "UV", "4官"),
