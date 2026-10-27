@@ -5,8 +5,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .protocol import DataError, decode_json, require, sha256, validate_latest
+from .protocol import DataError, canonical_json, decode_json, require, sha256, validate_latest
 from .signing import verify_release
+from .sources import validate_markdown
+from .price_gate import check_payload
 
 MAX_MANIFEST = 32 * 1024 * 1024
 
@@ -53,9 +55,11 @@ def fetch_release(base, keys, latest=None, *, allow_local_http=False, require_co
     if latest is None:
         latest = decode_json(get_bytes(base, "latest.json", 16 * 1024, **options))
     validate_latest(latest)
+    check_payload("latest.json", canonical_json(latest))
     raw = get_bytes(base, latest["manifestPath"], MAX_MANIFEST, **options)
     signature = get_bytes(base, latest["signaturePath"], 512, **options)
     manifest = verify_release(latest, raw, signature, keys)
+    check_payload("metadata/manifest.json", raw)
     total = sum(r["size"] for r in manifest["files"])
     require(total <= 512 * 1024 * 1024, "dataset exceeds client size limit")
     if verify_objects:
@@ -67,5 +71,6 @@ def fetch_release(base, keys, latest=None, *, allow_local_http=False, require_co
             content = get_bytes(base, "objects/" + digest, record["size"], **options)
             require(len(content) == record["size"] and sha256(content) == digest,
                     "mirror object integrity check failed")
+            validate_markdown(record["path"], content)
             checked.add(digest)
     return latest, manifest, raw, signature

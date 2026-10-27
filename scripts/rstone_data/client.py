@@ -15,6 +15,8 @@ from .protocol import (
     validate_manifest,
 )
 from .release import pointer_for
+from .price_gate import check_payload
+from .sources import validate_markdown
 from .signing import verify_release
 from .storage import ReleaseLock, atomic_write, safe_file
 from .transport import MAX_MANIFEST, fetch_release, get_bytes, validate_base
@@ -48,6 +50,7 @@ def _complete_tree(directory, manifest):
             raw = safe_file(directory, "files/" + record["path"]).read_bytes()
             if len(raw) != record["size"] or sha256(raw) != record["sha256"]:
                 return False
+            validate_markdown(record["path"], raw)
         return True
     except OSError:
         return False
@@ -60,6 +63,8 @@ def active_directory(cache, keys):
 
 
 def _accept(cache, keys, latest, manifest, raw, signature, provider, app_version, failpoint=None):
+    check_payload("metadata/manifest.json", raw)
+    check_payload("latest.json", canonical_json(latest))
     require(version_tuple(app_version) >= version_tuple(manifest["minAppVersion"]), "app upgrade required")
     previous = _active(cache, keys)
     if previous:
@@ -80,6 +85,7 @@ def _accept(cache, keys, latest, manifest, raw, signature, provider, app_version
         if cached is None or len(cached) != record["size"] or sha256(cached) != digest:
             content = provider(record)
             require(len(content) == record["size"] and sha256(content) == digest, "downloaded object integrity failure")
+            validate_markdown(record["path"], content)
             atomic_write(path, content)
             downloaded += 1
             downloaded_bytes += len(content)
@@ -92,6 +98,7 @@ def _accept(cache, keys, latest, manifest, raw, signature, provider, app_version
     for record in manifest["files"]:
         content = safe_file(cache, "objects/" + record["sha256"]).read_bytes()
         require(len(content) == record["size"] and sha256(content) == record["sha256"], "cache changed during activation")
+        validate_markdown(record["path"], content)
         atomic_write(safe_file(directory, "files/" + record["path"]), content)
     atomic_write(directory / "manifest.json", raw)
     atomic_write(directory / "manifest.sig", signature)
@@ -178,6 +185,7 @@ def import_package(package, cache, keys, app_version="1.0.0", failpoint=None):
         for record in manifest["files"]:
             content = read("files/" + record["path"], record["size"])
             require(len(content) == record["size"] and sha256(content) == record["sha256"], "ZIP object integrity failure")
+            validate_markdown(record["path"], content)
             content_by_hash[record["sha256"]] = content
     with ReleaseLock(cache):
         return _accept(cache, keys, latest, manifest, raw, signature,

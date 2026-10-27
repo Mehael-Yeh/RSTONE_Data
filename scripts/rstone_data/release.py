@@ -17,6 +17,7 @@ from .protocol import (
     validate_manifest,
 )
 from .signing import verify_release
+from .price_gate import check_tree, check_payload
 from .sources import Snapshot, validate_markdown
 from .storage import ReleaseLock, atomic_write, immutable_write, safe_file
 
@@ -49,6 +50,8 @@ class Store:
         return decode_json(path.read_bytes()) if path.exists() else None
 
     def read(self, pointer=None, verify_objects=True):
+        check_tree(self.public)
+        check_tree(self.state)
         if pointer is None:
             raw_latest = self.latest_bytes()
             if raw_latest is None:
@@ -63,7 +66,7 @@ class Store:
             manifest = verify_release(pointer, raw, sig, self.keys)
             if verify_objects:
                 for record in manifest["files"]:
-                    self.object(record)
+                    validate_markdown(record["path"], self.object(record))
             return manifest
         except OSError as exc:
             raise DataError("release resource missing or unreadable") from exc
@@ -87,6 +90,9 @@ class Store:
                 max_deletion_fraction=0.25, approval=None, now=None, rollback_of=None, failpoint=None):
         require(public_scope_approved, "public data scope must be explicitly approved before publishing")
         require(signer is not None, "production signing key required")
+        if snapshot is not None:
+            check_payload("snapshot-metadata.json", canonical_json({
+                "sourceCommits": snapshot.commits, "warnings": snapshot.warnings}))
         self.public.mkdir(parents=True, exist_ok=True)
         with ReleaseLock(self.root):
             pending = self.pending()

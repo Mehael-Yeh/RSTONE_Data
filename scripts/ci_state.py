@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from rstone_data.protocol import DataError, require
+from rstone_data.price_gate import check_tree
 
 
 def git(path, *arguments):
@@ -39,6 +40,8 @@ def checkout(repository, destination):
 
 def checkpoint(store, message):
     require((Path(store) / ".git").exists(), "state must be a Git worktree")
+    check_tree(Path(store) / "public")
+    check_tree(Path(store) / "state")
     git(store, "add", "--all", "--", ".gitattributes", "public", "state")
     staged = git(store, "diff", "--cached", "--name-only")
     if staged:
