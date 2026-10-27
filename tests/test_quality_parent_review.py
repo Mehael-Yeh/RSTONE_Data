@@ -110,6 +110,32 @@ def test_rollback_can_restore_a_signed_release_with_historical_broken_link(store
     result = store.rollback(1, signing[0], public_scope_approved=True)
     assert result['status'] == 'pending'
     assert result['sequence'] == 3
+    # Revalidation must reuse the restored snapshot, not the newer sequence that
+    # fixed the link; otherwise promotion fails on the grandfathered link.
+    promoted = store.promote()
+    assert promoted['status'] == 'published'
+    assert (store.public / store.package(3)).is_file()
+
+
+def test_gc_keeps_the_baseline_a_retained_release_needs(store, signing):
+    """A retained release must stay revalidatable after its baseline is garbage collected."""
+    from datetime import timedelta
+    from test_release_quality import install_legacy
+    from rstone_data.release import utc_now
+    old = clean_snapshot()
+    old.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    install_legacy(store, signing[0], old, sequence=1)
+    inherited = clean_snapshot()
+    inherited.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    inherited.files['产品列表/RS100.md'] = inherited.files['产品列表/RS100.md'].replace(
+        '固含: 77'.encode(), '固含: 80'.encode())
+    result = store.prepare(inherited, signing[0], public_scope_approved=True)
+    store.promote()
+    assert result['sequence'] == 2
+    report = store.gc(retain=1, grace_days=0, apply=True, now=utc_now() + timedelta(days=30))
+    assert 1 in report['protectedSequences']
+    assert 2 in report['protectedSequences']
+    assert (store.public / store.package(2)).is_file()
 
 
 def test_rollback_of_mismatched_snapshot_is_rejected(store, signing):

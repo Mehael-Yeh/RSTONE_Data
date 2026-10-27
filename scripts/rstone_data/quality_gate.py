@@ -58,6 +58,12 @@ TECHNICAL_NUMBER = re.compile(
     r"\s*(?:±\s*\d+(?:\.\d+)?)?\s*%?$")
 EXTERNAL_LINK = re.compile(r"^(?:https?://|mailto:|tel:|ftp://|//|www\.)", re.I)
 WIKI_LINK = re.compile(r"\[\[([^\]]+)\]\]")
+# Frontmatter fields that name a product or recipe. Application records also
+# carry engineer and provenance wiki links; docs/SOURCE_AUDIT.md reports only
+# product references, so metadata scanning stays on product-bearing fields.
+APPLICATION_REFERENCE_FIELDS = ("底漆", "中漆", "面漆", "产品", "推荐产品", "相关产品",
+                                "对标", "技术源")
+PRODUCT_REFERENCE_FIELDS = ("技术源", "对标")
 
 # Supplier / competitor brand words. A brand must never be used as a product tag.
 BRAND_TAGS = frozenset({
@@ -614,10 +620,19 @@ def check_content(corpus: Corpus) -> list[dict]:
         metadata = doc.frontmatter or {}
         if metadata is None:
             continue
+        # Condition-qualified spellings such as 光泽(60°) are the same physical
+        # property as 光泽; check_field_types() already normalises them.
+        properties: dict[str, object] = {}
+        for key, value in metadata.items():
+            if not isinstance(key, str) or key == "tags":
+                continue
+            name = _normalise_field(key)
+            if properties.get(name) in (None, ""):
+                properties[name] = value
         substantive = False
         property_value = False
         for name in TECHNICAL_FIELDS:
-            value = metadata.get(name)
+            value = properties.get(name)
             if value is None or value == "":
                 continue
             if _numeric(value) or (isinstance(value, str) and value.strip()):
@@ -655,16 +670,19 @@ def _reference_targets(corpus: Corpus) -> list[tuple[str, str, str]]:
                       for reference in WIKI_LINK.findall(doc.body)]
         if doc.namespace == "产品列表":
             metadata = doc.frontmatter or {}
-            for key in ("技术源", "对标"):
+            for key in PRODUCT_REFERENCE_FIELDS:
                 value = metadata.get(key)
                 if isinstance(value, str):
                     references += [(reference, "reference-broken-techsource")
                                    for reference in WIKI_LINK.findall(value)]
         if doc.namespace == "产品应用":
-            for value in (doc.frontmatter or {}).values():
-                if isinstance(value, str):
-                    references += [(reference, "reference-broken")
-                                   for reference in WIKI_LINK.findall(value)]
+            for key, value in (doc.frontmatter or {}).items():
+                if not isinstance(value, str) or not isinstance(key, str):
+                    continue
+                if _normalise_field(key) not in APPLICATION_REFERENCE_FIELDS:
+                    continue  # engineer / provenance wiki links are not product references
+                references += [(reference, "reference-broken")
+                               for reference in WIKI_LINK.findall(value)]
         for reference, category in references:
             if EXTERNAL_LINK.match(reference.strip()):
                 continue  # explicit external link, not an internal wiki link

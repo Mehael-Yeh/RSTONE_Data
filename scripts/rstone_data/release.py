@@ -101,8 +101,17 @@ class Store:
             previous = validate_manifest(decode_json(raw))
             self.read(pointer_for(previous, raw))
             baseline = self._snapshot(previous)
+        links_baseline = baseline
+        if manifest.get("rollbackOf") is not None:
+            # A rollback republishes already-signed bytes, so its restored links
+            # must be grandfathered against the snapshot it restores, exactly as
+            # prepare() did; revalidating against the newer sequence would call a
+            # link the newer release fixed a brand-new violation.
+            links_baseline = self._rollback_baseline(manifest["rollbackOf"],
+                                                     self._snapshot(manifest))
         return validate_snapshot(self._snapshot(manifest), baseline,
-                                 identity_baseline=manifest.get("rollbackOf") is None)
+                                 identity_baseline=manifest.get("rollbackOf") is None,
+                                 references_baseline=links_baseline)
 
     def _rollback_baseline(self, sequence, snapshot):
         """Re-admit only the exact signed bytes of the release being restored.
@@ -270,6 +279,26 @@ class Store:
             if pending:
                 self.read(pending["pointer"])
                 protected.add(pending["pointer"]["sequence"])
+            # A retained release is revalidated against the signed release it
+            # inherited links from. Removing that baseline turns grandfathered
+            # links into new violations, so keep one level of that evidence.
+            for sequence in sorted(protected):
+                if sequence not in manifests:
+                    continue
+                earlier = [seq for seq in manifests if seq < sequence]
+                if earlier:
+                    protected.add(max(earlier))
+            # A rollback manifest is revalidated against the release it restores,
+            # so keep that release too (and its own rollback source, transitively).
+            evidence = list(protected)
+            while evidence:
+                manifest = manifests.get(evidence.pop())
+                if manifest is None:
+                    continue
+                target = manifest.get("rollbackOf")
+                if target is not None and target not in protected:
+                    protected.add(target)
+                    evidence.append(target)
             cutoff = (now or utc_now()) - timedelta(days=grace_days)
             for sequence, manifest in manifests.items():
                 published = datetime.strptime(manifest["publishedAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)

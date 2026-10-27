@@ -181,12 +181,15 @@ def test_rollback_new_sequence_history_gc_and_zip(store, sources, signing):
     package = store.package(3)
     assert (store.public / package).is_file()
     plan = store.gc(retain=2, grace_days=0, now=datetime.now(timezone.utc) + timedelta(days=1))
-    assert "manifests/000001.json" in plan["remove"]
+    # Sequence 3 restores sequence 1, so its revalidation needs that signed
+    # release: the baseline evidence is part of what a retained release costs.
+    assert plan["protectedSequences"] == [1, 2, 3]
+    assert "manifests/000001.json" not in plan["remove"]
     for record in current["files"]:
         assert "objects/" + record["sha256"] not in plan["remove"]
     assert (store.public / "manifests/000001.json").exists()
     store.gc(retain=2, grace_days=0, apply=True, now=datetime.now(timezone.utc) + timedelta(days=1))
-    assert store.sequences() == [2, 3]
+    assert store.sequences() == [1, 2, 3]
     assert store.read()["sequence"] == 3
 
 
@@ -226,7 +229,8 @@ def test_gc_protects_both_current_and_pending(store, sources, signing):
     store.prepare(third, signing[0], public_scope_approved=True)
     plan = store.gc(retain=1, grace_days=0, apply=True,
                     now=datetime.now(timezone.utc) + timedelta(days=1))
-    assert plan["protectedSequences"] == [2, 3]
+    # Sequence 1 is sequence 2's inherited-link baseline, so it is retained too.
+    assert plan["protectedSequences"] == [1, 2, 3]
     assert store.read()["sequence"] == 2
     assert store.read(store.pending()["pointer"])["sequence"] == 3
     store.promote()

@@ -333,6 +333,13 @@ def test_product_with_property_passes(tmp_path):
     assert run(root).check("content")["ok"]
 
 
+def test_condition_qualified_property_counts_as_substance(tmp_path):
+    """光泽(60°) is the same physical property as 光泽, as check_field_types() assumes."""
+    empty = {key: "" for key in DEFAULT_FIELDS}
+    root = corpus(tmp_path, {"RS100": product(fields={**empty, "光泽(60°)": "80"})})
+    assert run(root).check("content")["ok"]
+
+
 def test_product_with_technical_note_passes(tmp_path):
     empty = {key: "" for key in DEFAULT_FIELDS}
     body = "\n##### 特别说明\n- 喷涂型准分子体系；耐湿热和耐黄变性能佳。\n"
@@ -370,6 +377,14 @@ def test_reference_with_alias_and_heading_passes(tmp_path):
 
 def test_external_link_is_not_an_internal_wiki_link(tmp_path):
     app = '---\ntags: [PC]\n资料: "[[https://example.com/tds|TDS 下载]]"\n---\n'
+    root = corpus(tmp_path, apps={"方案": app})
+    assert run(root).check("references")["ok"]
+
+
+def test_non_product_metadata_links_are_not_references(tmp_path):
+    """docs/SOURCE_AUDIT.md: engineer and provenance wiki links are not product references."""
+    app = ('---\ntags: [PC]\n底漆: "[[RS100]]"\n工程师: "[[张三]]"\n'
+           '来源: "[[微信记录]]"\n---\n')
     root = corpus(tmp_path, apps={"方案": app})
     assert run(root).check("references")["ok"]
 

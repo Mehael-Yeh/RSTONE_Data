@@ -76,6 +76,8 @@ CI 用 checkout 的两个专用只读 deploy key。采集读取 Git blob，忽�
 调整 config/release.json 的 retainVersions（默认 30）和 gcGraceDays（默认 7）后审核提交。
 运行 Prune retained data history 工作流；它与发布串行，存在 pending 时拒绝维护，全部被保留版本校验后才清理。
 latest 和保留/pending 版本仍引用的对象绝不删除；在宽限期内的版本和新对象也保留。
+质量门禁重校验需要签名基线：保留版本所依赖的上一个版本、以及 rollback 版本指向的源版本也一并保留
+（因此实际保留数量会略多于 retainVersions），否则原本被继承放行的历史失效链接会被当成新问题。
 Git 历史依然保存已公开数据，清理站点不能撤回公开资料。
 
 先在分发状态的独立副本检查计划：
