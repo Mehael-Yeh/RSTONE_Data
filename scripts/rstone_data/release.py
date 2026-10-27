@@ -27,6 +27,20 @@ def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 
+# Distinguishes "the caller did not record a baseline" from "the baseline was the
+# first release, i.e. none".
+_INFER = object()
+
+
+def _pending_baseline(pending):
+    """Baseline sequence recorded when the pending release was prepared.
+
+    Pending markers written before baselines were recorded fall back to
+    inference, so an in-flight release survives an upgrade.
+    """
+    return pending.get("qualityBaselineSequence", _INFER)
+
+
 def pointer_for(manifest, raw):
     name = manifest_name(manifest["sequence"])
     return {"protocolVersion": 1, "sequence": manifest["sequence"], "dataVersion": manifest["dataVersion"],
@@ -91,16 +105,31 @@ class Store:
         return Snapshot({r["path"]: self.object(r) for r in manifest["files"]},
                         manifest["sourceCommits"])
 
-    def _release_quality(self, manifest):
+    def _signed_snapshot(self, sequence):
+        """Verify and return the exact signed bytes of a published release."""
+        raw = safe_file(self.public, manifest_name(sequence)).read_bytes()
+        manifest = validate_manifest(decode_json(raw))
+        self.read(pointer_for(manifest, raw))
+        return self._snapshot(manifest)
+
+    def _release_quality(self, manifest, baseline_sequence=_INFER):
         # Only an earlier signed release can grandfather historical broken links.
-        # Never compare a pending/restored release against itself.
-        earlier = [seq for seq in self.sequences() if seq < manifest["sequence"]]
-        baseline = None
-        if earlier:
-            raw = safe_file(self.public, manifest_name(max(earlier))).read_bytes()
-            previous = validate_manifest(decode_json(raw))
-            self.read(pointer_for(previous, raw))
-            baseline = self._snapshot(previous)
+        # Never compare a pending/restored release against itself. The baseline
+        # actually used by prepare() is persisted with the pending release: an
+        # abandoned sequence (manifest written, pending.json never written) is
+        # published nowhere and must not become the reference.
+        sequences = self.sequences()
+        earlier = [seq for seq in sequences if seq < manifest["sequence"]]
+        if baseline_sequence is _INFER:
+            baseline_sequence = max(earlier) if earlier else None
+        elif baseline_sequence is None:
+            baseline_sequence = None
+        else:
+            require(baseline_sequence < manifest["sequence"],
+                    "quality baseline is not an earlier release")
+            if baseline_sequence not in sequences:
+                raise DataError("quality baseline release missing")
+        baseline = self._signed_snapshot(baseline_sequence) if baseline_sequence is not None else None
         links_baseline = baseline
         if manifest.get("rollbackOf") is not None:
             # A rollback republishes already-signed bytes, so its restored links
@@ -144,7 +173,7 @@ class Store:
             pending = self.pending()
             if pending:
                 manifest = self.read(pending["pointer"])
-                quality = self._release_quality(manifest)
+                quality = self._release_quality(manifest, _pending_baseline(pending))
                 return dict(pending["summary"], qualityGate=quality, status="pending", resumed=True)
             previous = self.read()
             # Even programmatic ingestion is validated. Rollback data also passes present-day secret checks.
@@ -192,6 +221,7 @@ class Store:
             summary.update(sequence=sequence, status="pending", dataVersion=manifest["dataVersion"])
             pending = {"pointer": pointer, "previousLatestSha256": sha256(self.latest_bytes())
                        if self.latest_bytes() is not None else None, "summary": summary}
+            pending["qualityBaselineSequence"] = previous["sequence"] if previous else None
             atomic_write(self.state / "pending.json", canonical_json(pending))
             if failpoint:
                 failpoint("pending")
@@ -202,7 +232,7 @@ class Store:
             pending = self.pending()
             require(pending is not None, "no pending release")
             pointer = pending["pointer"]
-            self._release_quality(self.read(pointer))
+            self._release_quality(self.read(pointer), _pending_baseline(pending))
             new_latest = canonical_json(pointer)
             current = self.latest_bytes()
             already_committed = current == new_latest
@@ -226,7 +256,7 @@ class Store:
         with ReleaseLock(self.root):
             pending = self.pending()
             require(pending is not None, "no pending deployment to acknowledge")
-            self._release_quality(self.read(pending["pointer"]))
+            self._release_quality(self.read(pending["pointer"]), _pending_baseline(pending))
             require(self.latest_bytes() == canonical_json(pending["pointer"]), "local latest not promoted")
             remote_verifier(pending["pointer"])
             (self.state / "pending.json").unlink()
@@ -246,7 +276,10 @@ class Store:
         raw = path.read_bytes()
         manifest = validate_manifest(decode_json(raw))
         pointer = pointer_for(manifest, raw)
-        self._release_quality(self.read(pointer))
+        pending = self.pending()
+        baseline = _pending_baseline(pending) if pending and \
+            pending["pointer"]["sequence"] == sequence else _INFER
+        self._release_quality(self.read(pointer), baseline)
         entries = {"metadata/manifest.json": raw,
                    "metadata/manifest.sig": safe_file(self.public, pointer["signaturePath"]).read_bytes()}
         entries.update({"files/" + r["path"]: self.object(r) for r in manifest["files"]})

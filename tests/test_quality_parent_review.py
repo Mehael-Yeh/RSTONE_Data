@@ -138,6 +138,37 @@ def test_gc_keeps_the_baseline_a_retained_release_needs(store, signing):
     assert (store.public / store.package(2)).is_file()
 
 
+def test_abandoned_manifest_does_not_become_the_revalidation_baseline(store, signing):
+    """Baseline is the published release prepare() used, not the highest sequence on disk."""
+    from test_release_quality import install_legacy
+    old = clean_snapshot()
+    old.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    install_legacy(store, signing[0], old, sequence=1)
+
+    def interrupt(name):
+        if name == 'manifest':
+            raise RuntimeError('interrupted after signing')
+
+    abandoned = clean_snapshot()
+    abandoned.files['产品配方/配方.md'] = b'| RS100 | 100 |\n'  # fixes the historical link
+    abandoned.files['产品列表/RS100.md'] = abandoned.files['产品列表/RS100.md'].replace(
+        '固含: 77'.encode(), '固含: 78'.encode())
+    with pytest.raises(RuntimeError):
+        store.prepare(abandoned, signing[0], public_scope_approved=True, failpoint=interrupt)
+    assert store.pending() is None
+    assert 2 in store.sequences()  # signed but never published
+
+    candidate = clean_snapshot()
+    candidate.files['产品配方/配方.md'] += b'[[RS999999]]\n'  # keeps sequence 1's link
+    candidate.files['产品列表/RS100.md'] = candidate.files['产品列表/RS100.md'].replace(
+        '固含: 77'.encode(), '固含: 80'.encode())
+    result = store.prepare(candidate, signing[0], public_scope_approved=True)
+    assert result['sequence'] == 3
+    assert result['qualityGate']['summary']['ok']
+    store.promote()  # must not validate against the abandoned sequence 2
+    assert store.read()['sequence'] == 3
+
+
 def test_rollback_of_mismatched_snapshot_is_rejected(store, signing):
     """A rollback marker must not whitelist arbitrary new content."""
     from test_release_quality import install_legacy
