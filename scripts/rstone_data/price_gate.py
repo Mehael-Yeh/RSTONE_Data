@@ -5,14 +5,14 @@ import unicodedata
 from .protocol import DataError, sha256
 
 LABEL = re.compile(
-    r"价格|報價|报价|單價|单价|成交价|成交價|供货价|供貨價|采购价|採購價|"
+    r"价格|價格|報價|报价|單價|单价|成交价|成交價|供货价|供貨價|采购价|採購價|"
     r"成本价|成本價|售价|售價|税价|稅價|折扣|返利|成本(?![\u4e00-\u9fff])|"
     r"(?<![a-z])(?:prices?|quotation|unit[_ -]?price|discount|rebate|cost)(?![a-z])", re.I)
 NUMBER = r"[+-]?\d[\d,]*(?:\.\d+)?"
 CODE = r"(?:CNY|RMB|USD|EUR|GBP|JPY|HKD|AUD|CAD|CHF)"
 CURRENCY = r"(?:人民币|人民幣|美元|欧元|歐元|港元|日元|英镑|英鎊|[¥$€£])"
 MONEY = re.compile(
-    rf"(?<![a-z0-9]){CODE}\s*{NUMBER}(?![a-z0-9_.])|{CURRENCY}\s*{NUMBER}(?![a-z0-9_.])|"
+    rf"(?<![a-z0-9]){CODE}\s*{NUMBER}(?![a-z0-9_])|{CURRENCY}\s*{NUMBER}|"
     rf"(?<![a-z0-9]){NUMBER}\s*(?:万|萬|亿|億)?(?:{CODE}(?![a-z0-9])|{CURRENCY}|元)", re.I)
 
 

@@ -133,6 +133,17 @@ def test_price_content_blocked_without_echo(text):
     assert text not in str(error.value)
 
 
+@pytest.mark.parametrize('text', ['USD 9876.54.','$9876.54.','價格: null','價格: 9876.54'])
+def test_amount_sentence_punctuation_and_traditional_label(text):
+    with pytest.raises(DataError,match='public price gate'):
+        validate_markdown('产品TDS/RS90001.TDS.md',text.encode())
+
+
+def test_amount_before_filename_extension_is_blocked():
+    with pytest.raises(DataError,match='public price gate'):
+        validate_markdown('产品TDS/USD9876.54.TDS.md',b'technical')
+
+
 def test_generated_hex_digest_is_not_a_currency_amount():
     from rstone_data.price_gate import check_payload
     raw=b'# Technical TDS\nViscosity 14192 mPa.s\n'
