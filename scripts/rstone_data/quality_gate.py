@@ -179,24 +179,40 @@ def load_corpus(root: Path) -> Corpus:
         directory = base / namespace
         if not directory.is_dir():
             continue
-        for entry in sorted(directory.iterdir()):
-            if entry.is_dir() or entry.name.startswith("."):
-                continue
-            relative = f"{namespace}/{entry.name}"
-            if not entry.name.endswith(".md"):
+        for entry, suffix in _files_under(directory):
+            relative = f"{namespace}/{suffix}"
+            if entry.name.endswith(".md"):
+                _load_document(corpus, entry, relative, namespace)
+            elif "/" in suffix and not entry.name.lower().endswith(".md"):
+                continue  # nested non-Markdown is not part of a publication snapshot
+            else:
                 corpus.stray.append({"path": relative, "category": "identity-suffix"})
-                continue
-            _load_document(corpus, entry, relative, namespace)
     if tds is not None:
-        for entry in sorted(tds.iterdir()):
-            if entry.is_dir() or entry.name.startswith("."):
-                continue
-            relative = f"产品TDS/{entry.name}"
-            if not entry.name.endswith(".TDS.md"):
+        for entry, suffix in _files_under(tds):
+            relative = f"产品TDS/{suffix}"
+            if "/" in suffix:
+                # sources only publishes TDS files at the top level of RstoneTDS.
+                corpus.stray.append({"path": relative, "category": "identity-tds-nested"})
+            elif not entry.name.endswith(".TDS.md"):
                 corpus.stray.append({"path": relative, "category": "identity-tds-suffix"})
-                continue
-            _load_document(corpus, entry, relative, "产品TDS")
+            else:
+                _load_document(corpus, entry, relative, "产品TDS")
     return corpus
+
+
+def _files_under(directory: Path):
+    """Yield (path, posix-suffix) for published files, recursively, hiding dotted entries.
+
+    sources._blobs() publishes nested Markdown below a source namespace, so the
+    gate must read the same set or those files ship unvalidated.
+    """
+    for entry in sorted(directory.rglob("*")):
+        suffix = entry.relative_to(directory).as_posix()
+        if any(part.startswith(".") for part in suffix.split("/")):
+            continue
+        if entry.is_dir():
+            continue
+        yield entry, suffix
 
 
 def _load_document(corpus: Corpus, entry: Path, relative: str, namespace: str) -> None:

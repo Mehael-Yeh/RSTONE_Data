@@ -160,6 +160,29 @@ def test_identity_tds_suffix_rejected(tmp_path):
     assert "identity-tds-suffix" in categories(report, "identity")
 
 
+def test_nested_markdown_is_scanned(tmp_path):
+    """sources._blobs() publishes nested Markdown, so the gate must validate it."""
+    root = corpus(tmp_path, {"RS100": product()})
+    write(root, "Rstone/产品列表/归档/RS200.md", product(tags=("双组分", "UV")))
+    assert "tag-first" in categories(run(root), "tags")
+
+
+def test_nested_non_markdown_and_dotted_directories_are_ignored(tmp_path):
+    root = corpus(tmp_path, {"RS100": product()})
+    write(root, "Rstone/产品列表/资源/示意图.png", "not markdown")
+    write(root, "Rstone/产品列表/.cache/RS300.md", product(tags=("双组分", "UV")))
+    report = run(root)
+    assert report.check("tags")["ok"]
+    assert report.check("identity")["ok"]
+
+
+def test_nested_tds_file_is_rejected(tmp_path):
+    """RstoneTDS publishes top-level files only; a nested TDS would ship unsigned by the gate."""
+    root = corpus(tmp_path, {"RS100": product()})
+    write(root, "RstoneTDS/归档/RS100.TDS.md", "# RS100\n")
+    assert "identity-tds-nested" in categories(run(root), "identity")
+
+
 # -------------------------------------------------------------------- 2 tags
 
 def test_tags_first_position_rejected(tmp_path):
