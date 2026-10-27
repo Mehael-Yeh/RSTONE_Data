@@ -60,7 +60,17 @@ def validate_markdown(path, raw):
     has_frontmatter = bool(lines) and lines[0].strip() == "---"
     require(not required or has_frontmatter, f"missing YAML frontmatter: {path}")
     if path.startswith("产品列表/"):
-        require(Path(path).stem.upper().startswith(("RD", "RS")), f"invalid product name: {path}")
+        name = Path(path).stem
+        # Keep legacy RD/RS names verbatim. External identifiers must look like
+        # numbered grades, not arbitrary Markdown/control document titles.
+        control_name = re.match(
+            r"(?:readme|tags?|synonyms?|rules?|index|changelog)(?:[0-9 ._()-]|$)", name, re.I)
+        external_grade = (not control_name
+                          and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._()+-]*", name)
+                          and re.search(r"[0-9]", name))
+        pigment_grade = re.fullmatch(r"色浆-[\u4e00-\u9fff]+[0-9][A-Za-z0-9._()+-]*", name)
+        require(name.upper().startswith(("RD", "RS")) or external_grade or pigment_grade,
+                f"invalid product name: {path}")
     if not has_frontmatter:
         return text
     try:
