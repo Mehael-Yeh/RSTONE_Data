@@ -19,11 +19,26 @@ from .protocol import (
 from .signing import verify_release
 from .price_gate import check_tree, check_payload
 from .sources import Snapshot, validate_markdown
+from .quality_gate import validate_snapshot
 from .storage import ReleaseLock, atomic_write, immutable_write, safe_file
 
 
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+# Distinguishes "the caller did not record a baseline" from "the baseline was the
+# first release, i.e. none".
+_INFER = object()
+
+
+def _pending_baseline(pending):
+    """Baseline sequence recorded when the pending release was prepared.
+
+    Pending markers written before baselines were recorded fall back to
+    inference, so an in-flight release survives an upgrade.
+    """
+    return pending.get("qualityBaselineSequence", _INFER)
 
 
 def pointer_for(manifest, raw):
@@ -86,6 +101,66 @@ class Store:
         return sorted({int(p.stem) for p in directory.iterdir()
                        if re.fullmatch(r"[0-9]{6,}\.(json|sig)", p.name)})
 
+    def _snapshot(self, manifest):
+        return Snapshot({r["path"]: self.object(r) for r in manifest["files"]},
+                        manifest["sourceCommits"])
+
+    def _signed_snapshot(self, sequence):
+        """Verify and return the exact signed bytes of a published release."""
+        raw = safe_file(self.public, manifest_name(sequence)).read_bytes()
+        manifest = validate_manifest(decode_json(raw))
+        self.read(pointer_for(manifest, raw))
+        return self._snapshot(manifest)
+
+    def _release_quality(self, manifest, baseline_sequence=_INFER):
+        # Only an earlier signed release can grandfather historical broken links.
+        # Never compare a pending/restored release against itself. The baseline
+        # actually used by prepare() is persisted with the pending release: an
+        # abandoned sequence (manifest written, pending.json never written) is
+        # published nowhere and must not become the reference.
+        sequences = self.sequences()
+        earlier = [seq for seq in sequences if seq < manifest["sequence"]]
+        if baseline_sequence is _INFER:
+            baseline_sequence = max(earlier) if earlier else None
+        elif baseline_sequence is None:
+            baseline_sequence = None
+        else:
+            require(baseline_sequence < manifest["sequence"],
+                    "quality baseline is not an earlier release")
+            if baseline_sequence not in sequences:
+                raise DataError("quality baseline release missing")
+        baseline = self._signed_snapshot(baseline_sequence) if baseline_sequence is not None else None
+        links_baseline = baseline
+        if manifest.get("rollbackOf") is not None:
+            # A rollback republishes already-signed bytes, so its restored links
+            # must be grandfathered against the snapshot it restores, exactly as
+            # prepare() did; revalidating against the newer sequence would call a
+            # link the newer release fixed a brand-new violation.
+            links_baseline = self._rollback_baseline(manifest["rollbackOf"],
+                                                     self._snapshot(manifest))
+        return validate_snapshot(self._snapshot(manifest), baseline,
+                                 identity_baseline=manifest.get("rollbackOf") is None,
+                                 references_baseline=links_baseline)
+
+    def _rollback_baseline(self, sequence, snapshot):
+        """Re-admit only the exact signed bytes of the release being restored.
+
+        A rollback republishes content that was already signed and public, so its
+        own historical broken links cannot block disaster recovery. The snapshot
+        must match the signed manifest byte-for-byte, otherwise the marker would
+        whitelist arbitrary new content.
+        """
+        path = safe_file(self.public, manifest_name(sequence))
+        raw = path.read_bytes()
+        manifest = validate_manifest(decode_json(raw))
+        self.read(pointer_for(manifest, raw))
+        signed = self._snapshot(manifest)
+        require(set(signed.files) == set(snapshot.files), "rollback snapshot does not match signed release")
+        for name, data in signed.files.items():
+            require(sha256(data) == sha256(snapshot.files[name]),
+                    "rollback snapshot does not match signed release")
+        return signed
+
     def prepare(self, snapshot, signer, *, public_scope_approved=False, min_app_version="1.0.0",
                 max_deletion_fraction=0.25, approval=None, now=None, rollback_of=None, failpoint=None):
         require(public_scope_approved, "public data scope must be explicitly approved before publishing")
@@ -97,12 +172,19 @@ class Store:
         with ReleaseLock(self.root):
             pending = self.pending()
             if pending:
-                self.read(pending["pointer"])
-                return dict(pending["summary"], status="pending", resumed=True)
+                manifest = self.read(pending["pointer"])
+                quality = self._release_quality(manifest, _pending_baseline(pending))
+                return dict(pending["summary"], qualityGate=quality, status="pending", resumed=True)
             previous = self.read()
             # Even programmatic ingestion is validated. Rollback data also passes present-day secret checks.
             for path, raw in snapshot.files.items():
                 validate_markdown(path, raw)
+            links_baseline = self._snapshot(previous) if previous else None
+            if rollback_of is not None:
+                links_baseline = self._rollback_baseline(rollback_of, snapshot)
+            quality = validate_snapshot(snapshot, self._snapshot(previous) if previous else None,
+                                        identity_baseline=rollback_of is None,
+                                        references_baseline=links_baseline)
             records = inventory(snapshot.files)
             check_deletions(previous, records, max_deletion_fraction,
                             approval if rollback_of is None else
@@ -112,6 +194,7 @@ class Store:
                        "deleted": len(diff["deleted"]), "unchanged": len(diff["unchanged"]),
                        "newObjects": 0, "uploadedBytes": 0, "sourceCommits": snapshot.commits,
                        "mappingSha256": mapping_digest(records), "warnings": snapshot.warnings,
+                       "qualityGate": quality,
                        "changes": diff}
             if previous and not (summary["added"] or summary["modified"] or summary["deleted"]):
                 return dict(summary, status="unchanged", sequence=previous["sequence"])
@@ -138,6 +221,7 @@ class Store:
             summary.update(sequence=sequence, status="pending", dataVersion=manifest["dataVersion"])
             pending = {"pointer": pointer, "previousLatestSha256": sha256(self.latest_bytes())
                        if self.latest_bytes() is not None else None, "summary": summary}
+            pending["qualityBaselineSequence"] = previous["sequence"] if previous else None
             atomic_write(self.state / "pending.json", canonical_json(pending))
             if failpoint:
                 failpoint("pending")
@@ -148,7 +232,7 @@ class Store:
             pending = self.pending()
             require(pending is not None, "no pending release")
             pointer = pending["pointer"]
-            self.read(pointer)
+            self._release_quality(self.read(pointer), _pending_baseline(pending))
             new_latest = canonical_json(pointer)
             current = self.latest_bytes()
             already_committed = current == new_latest
@@ -172,7 +256,7 @@ class Store:
         with ReleaseLock(self.root):
             pending = self.pending()
             require(pending is not None, "no pending deployment to acknowledge")
-            self.read(pending["pointer"])
+            self._release_quality(self.read(pending["pointer"]), _pending_baseline(pending))
             require(self.latest_bytes() == canonical_json(pending["pointer"]), "local latest not promoted")
             remote_verifier(pending["pointer"])
             (self.state / "pending.json").unlink()
@@ -192,7 +276,10 @@ class Store:
         raw = path.read_bytes()
         manifest = validate_manifest(decode_json(raw))
         pointer = pointer_for(manifest, raw)
-        self.read(pointer)
+        pending = self.pending()
+        baseline = _pending_baseline(pending) if pending and \
+            pending["pointer"]["sequence"] == sequence else _INFER
+        self._release_quality(self.read(pointer), baseline)
         entries = {"metadata/manifest.json": raw,
                    "metadata/manifest.sig": safe_file(self.public, pointer["signaturePath"]).read_bytes()}
         entries.update({"files/" + r["path"]: self.object(r) for r in manifest["files"]})
@@ -225,6 +312,26 @@ class Store:
             if pending:
                 self.read(pending["pointer"])
                 protected.add(pending["pointer"]["sequence"])
+            # A retained release is revalidated against the signed release it
+            # inherited links from. Removing that baseline turns grandfathered
+            # links into new violations, so keep one level of that evidence.
+            for sequence in sorted(protected):
+                if sequence not in manifests:
+                    continue
+                earlier = [seq for seq in manifests if seq < sequence]
+                if earlier:
+                    protected.add(max(earlier))
+            # A rollback manifest is revalidated against the release it restores,
+            # so keep that release too (and its own rollback source, transitively).
+            evidence = list(protected)
+            while evidence:
+                manifest = manifests.get(evidence.pop())
+                if manifest is None:
+                    continue
+                target = manifest.get("rollbackOf")
+                if target is not None and target not in protected:
+                    protected.add(target)
+                    evidence.append(target)
             cutoff = (now or utc_now()) - timedelta(days=grace_days)
             for sequence, manifest in manifests.items():
                 published = datetime.strptime(manifest["publishedAt"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)

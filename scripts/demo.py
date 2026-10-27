@@ -56,6 +56,16 @@ def demonstrate(output):
             return result
 
         first, second = snapshots()
+        # The immutable interoperability fixtures predate the publication gate.
+        # Give this new synthetic demo controlled tags without rewriting fixtures.
+        for snapshot in (first, second):
+            for path, raw in snapshot.files.items():
+                if path.startswith("产品列表/"):
+                    raw = raw.replace("tags: [UV, 示例]".encode(), "tags: [水性, UV]".encode())
+                    raw = raw.replace("tags: [PU, 示例]".encode(), "tags: [水性, PU]".encode())
+                elif path.startswith("产品应用/"):
+                    raw = raw.replace("tags: [PC, 示例]".encode(), b"tags: [PC]")
+                snapshot.files[path] = raw
         publish(first)
         initial = synchronize([base], output / "client", keys, allow_local_http=True)
         publish(second)

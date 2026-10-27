@@ -33,8 +33,8 @@ def sources(tmp_path):
         repository = "Rstone" if path == rstone else "RstoneTDS"
         run_git(path, "remote", "add", "origin", f"https://github.com/Mehael-Yeh/{repository}.git")
     data = {
-        "产品列表/RS100.md": b"---\ntags: [UV]\n---\n# RS100\r\n",
-        "产品列表/RD200.md": b"---\ntags: [PU]\n---\n# RD200\n",
+        "产品列表/RS100.md": "---\ntags: [水性, UV]\n固含: 77\n---\n# RS100\r\n".encode(),
+        "产品列表/RD200.md": "---\ntags: [水性, PU]\n固含: 77\n---\n# RD200\n".encode(),
         "产品应用/方案.md": '---\ntags: [PC]\n底漆: "[[RS100]]"\n---\n'.encode(),
         "产品配方/RS100-配方.md": b"| A | B |\n| - | - |\n| RS100 | 100 |\n",
     }

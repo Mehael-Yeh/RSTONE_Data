@@ -20,7 +20,7 @@ def test_skip_versions_only_download_changed_objects_and_keep_overlay(store, sou
         overlay = cache / "overlay/用户产品.md"
         overlay.parent.mkdir()
         overlay.write_bytes(b"user data")
-        second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nchanged once\n")
+        second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nchanged once\n")
         second = changed(second, "产品列表/RS300.md", first.files["产品列表/RS100.md"])
         publish(store, second, signing[0])
         third = changed(second, "产品列表/RD200.md")
@@ -54,7 +54,7 @@ def test_mirrors_supply_same_target_objects_even_with_stale_latest(store, source
     cache = tmp_path / "client"
     with serve(store.public) as base:
         synchronize([base], cache, signing[1], allow_local_http=True)
-    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nversion2\n")
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nversion2\n")
     publish(store, second, signing[0])
     mirror1, mirror2 = tmp_path / "mirror1", tmp_path / "mirror2"
     shutil.copytree(store.public, mirror1)
@@ -74,7 +74,7 @@ def test_all_mirrors_missing_object_retains_previous_generation(store, sources, 
     with serve(store.public) as base:
         synchronize([base], cache, signing[1], allow_local_http=True)
     baseline = (cache / "active.json").read_bytes()
-    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nmissing\n")
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nmissing\n")
     publish(store, second, signing[0])
     faults = {"/objects/" + sha256(second.files["产品列表/RS100.md"])}
     with serve(store.public, faults=faults) as base:
@@ -91,7 +91,7 @@ def test_client_interruption_never_activates_partial_data(store, sources, signin
     cache = tmp_path / "client"
     with serve(store.public) as base:
         synchronize([base], cache, signing[1], allow_local_http=True)
-        second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nnew data\n")
+        second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nnew data\n")
         publish(store, second, signing[0])
 
         def interrupt(event):
@@ -112,7 +112,7 @@ def test_stale_signed_version_and_signature_corruption_rejected(store, sources, 
     publish(store, first, signing[0])
     stale = tmp_path / "stale"
     shutil.copytree(store.public, stale)
-    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nnew data\n")
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nnew data\n")
     publish(store, second, signing[0])
     cache = tmp_path / "client"
     with serve(store.public) as base:
@@ -132,7 +132,7 @@ def test_signed_same_sequence_conflict_fails_closed(store, sources, signing, tmp
     first = collect(*sources)
     publish(store, first, signing[0])
     fork = Store(tmp_path / "fork", signing[1])
-    other = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nconflict\n")
+    other = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nconflict\n")
     publish(fork, other, signing[0])
     with serve(store.public) as base1, serve(fork.public) as base2:
         with pytest.raises(DataError, match="same-sequence conflict"):
@@ -162,7 +162,7 @@ def test_verified_zip_import_rejects_extra_entries_and_tampering(store, sources,
     result = import_package(package, cache, signing[1])
     assert result["sequence"] == 1
     baseline = (cache / "active.json").read_bytes()
-    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nnew data\n")
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nnew data\n")
     publish(store, second, signing[0])
     package = store.public / store.package(2)
     tampered = io.BytesIO()

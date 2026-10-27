@@ -40,10 +40,10 @@ def test_first_publication(store, sources, signing):
 def test_add_modify_delete_and_full_latest(store, sources, signing):
     first = collect(*sources)
     publish(store, first, signing[0])
-    second = changed(first, "产品列表/RS300.md", b"---\ntags: []\n---\nnew\n")
+    second = changed(first, "产品列表/RS300.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nnew\n")
     added = publish(store, second, signing[0])
     assert (added["added"], added["newObjects"]) == (1, 1)
-    third = changed(second, "产品列表/RS300.md", b"---\ntags: []\n---\nmodified\n")
+    third = changed(second, "产品列表/RS300.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nmodified\n")
     modified = publish(store, third, signing[0])
     assert (modified["modified"], modified["newObjects"]) == (1, 1)
     fourth = changed(third, "产品列表/RS300.md")
@@ -58,6 +58,8 @@ def test_add_modify_delete_and_full_latest(store, sources, signing):
                                      ("产品应用/方案.md", "产品应用/PC/方案.md")])
 def test_rename_move_reuses_objects(store, sources, signing, old, new):
     first = collect(*sources)
+    # Rename an unreferenced product; breaking a real attachment is now rejected.
+    first.files["产品应用/方案.md"] = first.files["产品应用/方案.md"].replace(b"RS100", b"RD200")
     publish(store, first, signing[0])
     second = changed(first, new, first.files[old])
     second = changed(second, old)
@@ -131,7 +133,7 @@ def test_interruption_and_recovery(store, sources, signing, step):
     first = collect(*sources)
     publish(store, first, signing[0])
     baseline = store.latest_bytes()
-    second = changed(first, "产品列表/RS300.md", b"---\ntags: []\n---\nadded\n")
+    second = changed(first, "产品列表/RS300.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nadded\n")
 
     def interrupt(event):
         if event == step:
@@ -154,7 +156,7 @@ def test_corrupt_object_never_promotes(store, sources, signing):
     first = collect(*sources)
     publish(store, first, signing[0])
     baseline = store.latest_bytes()
-    second = changed(first, "产品列表/RS300.md", b"---\ntags: []\n---\nadded\n")
+    second = changed(first, "产品列表/RS300.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nadded\n")
     store.prepare(second, signing[0], public_scope_approved=True)
     (store.public / "objects" / sha256(second.files["产品列表/RS300.md"])).write_bytes(b"bad")
     with pytest.raises(DataError, match="integrity"):
@@ -166,7 +168,7 @@ def test_rollback_new_sequence_history_gc_and_zip(store, sources, signing):
     first = collect(*sources)
     old_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
     publish(store, first, signing[0], now=old_time)
-    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nrevision 2\n")
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nrevision 2\n")
     publish(store, second, signing[0], now=old_time)
     original_manifest = (store.public / "manifests/000001.json").read_bytes()
     result = store.rollback(1, signing[0], public_scope_approved=True, now=old_time)
@@ -179,12 +181,15 @@ def test_rollback_new_sequence_history_gc_and_zip(store, sources, signing):
     package = store.package(3)
     assert (store.public / package).is_file()
     plan = store.gc(retain=2, grace_days=0, now=datetime.now(timezone.utc) + timedelta(days=1))
-    assert "manifests/000001.json" in plan["remove"]
+    # Sequence 3 restores sequence 1, so its revalidation needs that signed
+    # release: the baseline evidence is part of what a retained release costs.
+    assert plan["protectedSequences"] == [1, 2, 3]
+    assert "manifests/000001.json" not in plan["remove"]
     for record in current["files"]:
         assert "objects/" + record["sha256"] not in plan["remove"]
     assert (store.public / "manifests/000001.json").exists()
     store.gc(retain=2, grace_days=0, apply=True, now=datetime.now(timezone.utc) + timedelta(days=1))
-    assert store.sequences() == [2, 3]
+    assert store.sequences() == [1, 2, 3]
     assert store.read()["sequence"] == 3
 
 
@@ -218,13 +223,14 @@ def test_intentional_namespace_empty_requires_exact_approval(store, sources, sig
 def test_gc_protects_both_current_and_pending(store, sources, signing):
     first = collect(*sources)
     publish(store, first, signing[0])
-    second = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nversion 2\n")
+    second = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nversion 2\n")
     publish(store, second, signing[0])
-    third = changed(first, "产品列表/RS100.md", b"---\ntags: []\n---\nversion 3\n")
+    third = changed(first, "产品列表/RS100.md", b"---\ntags: [\"\\u6c34\\u6027\", UV]\n\"\\u56fa\\u542b\": 77\n---\nversion 3\n")
     store.prepare(third, signing[0], public_scope_approved=True)
     plan = store.gc(retain=1, grace_days=0, apply=True,
                     now=datetime.now(timezone.utc) + timedelta(days=1))
-    assert plan["protectedSequences"] == [2, 3]
+    # Sequence 1 is sequence 2's inherited-link baseline, so it is retained too.
+    assert plan["protectedSequences"] == [1, 2, 3]
     assert store.read()["sequence"] == 2
     assert store.read(store.pending()["pointer"])["sequence"] == 3
     store.promote()
