@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from .protocol import COMMIT, ROOTS, DataError, logical_path, require
-from .price_gate import check_price
+from .price_gate import check_price, check_metadata
 
 MAX_FILE_SIZE = 16 * 1024 * 1024
 SOURCE_SPECS = (("Mehael-Yeh/Rstone", "master"), ("Mehael-Yeh/RstoneTDS", "main"))
@@ -81,7 +81,7 @@ def validate_markdown(path, raw):
         header = "\n".join(lines[1:end])
         require(len(header.encode()) <= 64 * 1024, f"oversized frontmatter: {path}")
         metadata = yaml.load(header, Loader=UniqueLoader)
-        check_price(path, str(metadata))
+        check_metadata(path, metadata)
         require(isinstance(metadata, dict), f"frontmatter must be mapping: {path}")
         tags = metadata.get("tags")
         require(tags is None or isinstance(tags, list) and all(isinstance(v, str) for v in tags),

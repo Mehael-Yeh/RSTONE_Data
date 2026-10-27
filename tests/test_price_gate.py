@@ -133,6 +133,30 @@ def test_price_content_blocked_without_echo(text):
     assert text not in str(error.value)
 
 
+def test_generated_hex_digest_is_not_a_currency_amount():
+    from rstone_data.price_gate import check_payload
+    raw=b'# Technical TDS\nViscosity 14192 mPa.s\n'
+    digest=sha256(raw)
+    assert digest.startswith('cad49')
+    check_payload('objects/'+digest,raw)
+    check_payload('metadata.json',canonical_json({'sha256':digest}))
+
+
+@pytest.mark.parametrize('raw', [
+    b'---\nnote: "USD\\n9876.54"\n---\n',
+    b'---\n"\\u4ef7\\u200b\\u683c": 9876.54\n---\n',
+])
+def test_decoded_yaml_strings_are_scanned_without_repr_escaping(raw):
+    with pytest.raises(DataError,match='public price gate'):
+        validate_markdown('产品列表/RS90001.md',raw)
+
+
+def test_decoded_nested_json_strings_are_scanned_without_repr_escaping():
+    from rstone_data.price_gate import check_payload
+    with pytest.raises(DataError,match='public price gate'):
+        check_payload('synthetic.json',b'{"data":[{"note":"USD\\n9876.54"}]}')
+
+
 @pytest.mark.parametrize("text", ["售价: 9876.54", "成本: 9876.54", "cost: 9876.54"])
 def test_additional_monetary_fields_are_blocked(text):
     with pytest.raises(DataError, match="public price gate"):

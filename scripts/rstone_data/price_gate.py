@@ -12,7 +12,7 @@ NUMBER = r"[+-]?\d[\d,]*(?:\.\d+)?"
 CODE = r"(?:CNY|RMB|USD|EUR|GBP|JPY|HKD|AUD|CAD|CHF)"
 CURRENCY = r"(?:人民币|人民幣|美元|欧元|歐元|港元|日元|英镑|英鎊|[¥$€£])"
 MONEY = re.compile(
-    rf"(?<![a-z0-9]){CODE}\s*{NUMBER}|{CURRENCY}\s*{NUMBER}|"
+    rf"(?<![a-z0-9]){CODE}\s*{NUMBER}(?![a-z0-9_.])|{CURRENCY}\s*{NUMBER}(?![a-z0-9_.])|"
     rf"(?<![a-z0-9]){NUMBER}\s*(?:万|萬|亿|億)?(?:{CODE}(?![a-z0-9])|{CURRENCY}|元)", re.I)
 
 
@@ -25,6 +25,19 @@ def check_price(path, text):
     if category:
         # Even a filename can contain an amount. Use a stable path fingerprint, not its value.
         raise DataError(f"public price gate: path-sha256={sha256(path.encode('utf-8'))}; category={category}")
+
+
+def check_metadata(path, value):
+    """Inspect decoded scalar strings directly, never their escaped repr."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            check_metadata(path, key)
+            check_metadata(path, item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            check_metadata(path, item)
+    elif isinstance(value, str):
+        check_price(path, value)
 
 
 def check_payload(path, raw):
@@ -45,7 +58,7 @@ def check_payload(path, raw):
         raise DataError("public price gate: category=uninspectable-payload") from None
     check_price(path, text)
     if path.endswith(".json"):
-        check_price(path, str(decode_json(raw)))
+        check_metadata(path, decode_json(raw))
     elif text.splitlines() and text.splitlines()[0].strip() == "---":
         # Object hashes do not carry their logical names; apply the same YAML decoder.
         validate_markdown("产品TDS/public-object.TDS.md", raw)
