@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from .protocol import COMMIT, ROOTS, DataError, logical_path, require
+from .price_gate import check_price, check_metadata
 
 MAX_FILE_SIZE = 16 * 1024 * 1024
 SOURCE_SPECS = (("Mehael-Yeh/Rstone", "master"), ("Mehael-Yeh/RstoneTDS", "main"))
@@ -45,6 +46,7 @@ UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _ma
 
 
 def validate_markdown(path, raw):
+    check_price(path, path)
     logical_path(path)
     require(0 < len(raw) <= MAX_FILE_SIZE, f"empty or oversized Markdown: {path}")
     require(not SENSITIVE_NAME.search(Path(path).name), f"sensitive file name: {path}")
@@ -52,6 +54,7 @@ def validate_markdown(path, raw):
         text = raw.decode("utf-8-sig")
     except UnicodeError as exc:
         raise DataError(f"invalid UTF-8: {path}") from exc
+    check_price(path, text)
     require("\x00" not in text, f"NUL in Markdown: {path}")
     require(not text.startswith("version https://git-lfs.github.com/spec/v1"), f"unresolved Git LFS pointer: {path}")
     require(not SENSITIVE_CONTENT.search(text), f"sensitive content detected: {path}")
@@ -78,6 +81,7 @@ def validate_markdown(path, raw):
         header = "\n".join(lines[1:end])
         require(len(header.encode()) <= 64 * 1024, f"oversized frontmatter: {path}")
         metadata = yaml.load(header, Loader=UniqueLoader)
+        check_metadata(path, metadata)
         require(isinstance(metadata, dict), f"frontmatter must be mapping: {path}")
         tags = metadata.get("tags")
         require(tags is None or isinstance(tags, list) and all(isinstance(v, str) for v in tags),
