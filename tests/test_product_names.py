@@ -1,7 +1,7 @@
 """Synthetic product identifiers only; never copy private source documents here."""
 
 import pytest
-from conftest import commit_all
+from conftest import commit_all, run_git
 from rstone_data.protocol import DataError
 from rstone_data.sources import collect, validate_markdown
 
@@ -44,10 +44,15 @@ def test_external_grade_still_requires_valid_frontmatter():
 
 def test_external_case_collision_fails_closed(sources):
     rstone, tds = sources
-    raw = b"---\ntags: []\n---\n# synthetic product\n"
+    # Build both Git paths directly: Windows cannot hold case-distinct files.
+    # collect reads committed blobs, so the fixture must exercise that same seam.
+    oid = run_git(rstone, "rev-parse", "HEAD:产品列表/RS100.md").decode().strip()
+    run_git(rstone, "config", "core.ignorecase", "false")
     for name in ("X123", "x123"):
-        (rstone / f"产品列表/{name}.md").write_bytes(raw)
-    commit_all(rstone)
+        run_git(rstone, "update-index", "--add", "--cacheinfo",
+                f"100644,{oid},产品列表/{name}.md")
+    run_git(rstone, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "commit", "-m", "synthetic case collision")
     with pytest.raises(DataError, match="conflicting paths"):
         collect(rstone, tds)
 
