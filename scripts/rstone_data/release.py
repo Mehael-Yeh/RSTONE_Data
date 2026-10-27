@@ -104,6 +104,25 @@ class Store:
         return validate_snapshot(self._snapshot(manifest), baseline,
                                  identity_baseline=manifest.get("rollbackOf") is None)
 
+    def _rollback_baseline(self, sequence, snapshot):
+        """Re-admit only the exact signed bytes of the release being restored.
+
+        A rollback republishes content that was already signed and public, so its
+        own historical broken links cannot block disaster recovery. The snapshot
+        must match the signed manifest byte-for-byte, otherwise the marker would
+        whitelist arbitrary new content.
+        """
+        path = safe_file(self.public, manifest_name(sequence))
+        raw = path.read_bytes()
+        manifest = validate_manifest(decode_json(raw))
+        self.read(pointer_for(manifest, raw))
+        signed = self._snapshot(manifest)
+        require(set(signed.files) == set(snapshot.files), "rollback snapshot does not match signed release")
+        for name, data in signed.files.items():
+            require(sha256(data) == sha256(snapshot.files[name]),
+                    "rollback snapshot does not match signed release")
+        return signed
+
     def prepare(self, snapshot, signer, *, public_scope_approved=False, min_app_version="1.0.0",
                 max_deletion_fraction=0.25, approval=None, now=None, rollback_of=None, failpoint=None):
         require(public_scope_approved, "public data scope must be explicitly approved before publishing")
@@ -122,8 +141,12 @@ class Store:
             # Even programmatic ingestion is validated. Rollback data also passes present-day secret checks.
             for path, raw in snapshot.files.items():
                 validate_markdown(path, raw)
+            links_baseline = self._snapshot(previous) if previous else None
+            if rollback_of is not None:
+                links_baseline = self._rollback_baseline(rollback_of, snapshot)
             quality = validate_snapshot(snapshot, self._snapshot(previous) if previous else None,
-                                        identity_baseline=rollback_of is None)
+                                        identity_baseline=rollback_of is None,
+                                        references_baseline=links_baseline)
             records = inventory(snapshot.files)
             check_deletions(previous, records, max_deletion_fraction,
                             approval if rollback_of is None else

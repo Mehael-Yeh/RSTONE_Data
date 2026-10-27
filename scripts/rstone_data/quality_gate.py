@@ -54,7 +54,7 @@ RESIDUE_CHARS = re.compile(r"[\[\]{}]")
 # (H, HB, 2H, H(300g)) and tolerance / inequality values (77±2, 100–120, ≤2, >6).
 PENCIL_HARDNESS = re.compile(r"^(?:\d{1,2}\s*[BH]|[BH]|F|HB)(?:\s*[（(]\s*\d+\s*g\s*[)）])?$", re.I)
 TECHNICAL_NUMBER = re.compile(
-    r"^[<>≤≥＜＞]?\s*\d+(?:\.\d+)?(?:\s*[–~—]\s*\d+(?:\.\d+)?)?"
+    r"^[<>≤≥＜＞]?\s*\d+(?:\.\d+)?(?:\s*[-–~—]\s*\d+(?:\.\d+)?)?"
     r"\s*(?:±\s*\d+(?:\.\d+)?)?\s*%?$")
 EXTERNAL_LINK = re.compile(r"^(?:https?://|mailto:|tel:|ftp://|//|www\.)", re.I)
 WIKI_LINK = re.compile(r"\[\[([^\]]+)\]\]")
@@ -437,7 +437,10 @@ def check_tags(corpus: Corpus, vocabulary: frozenset[str]) -> list[dict]:
             if tag not in vocabulary:
                 violations.append({"path": doc.path, "category": "tag-unapproved",
                                    "field": text[index]})
-        if doc.namespace != "产品列表" or not tags:
+        if not tags:
+            violations.append({"path": doc.path, "category": "tag-empty"})
+            continue
+        if doc.namespace != "产品列表":
             continue
         first = tags[0] if isinstance(tags[0], str) else ""
         if first not in FIRST_TAGS:
@@ -533,6 +536,8 @@ def _typed_violations(path: str, name: str, value) -> list[dict]:
 
 def _viscosity_violations(path: str, value: str) -> list[dict]:
     found: list[dict] = []
+    if RESIDUE_LITERALS.match(value) or value.strip() in PLACEHOLDERS:
+        return [_failure(path, "field-residue", VISCOSITY_FIELD)]
     if "cP" in value or "cps" in value.lower() or "mPa·s" not in value:
         found.append(_review(path, "schema-viscosity-unit", VISCOSITY_FIELD))
     if "℃" not in value and "°C" not in value:
@@ -821,10 +826,15 @@ def snapshot_corpus(snapshot):
     return corpus
 
 
-def validate_snapshot(snapshot, baseline=None, identity_baseline=True):
+_UNSET = object()
+
+
+def validate_snapshot(snapshot, baseline=None, identity_baseline=True, references_baseline=_UNSET):
     """Mandatory publication check; deletion approvals remain governed by release.py."""
     corpus = snapshot_corpus(snapshot)
     base = snapshot_corpus(baseline) if baseline is not None else None
+    links_base = base if references_baseline is _UNSET else (
+        snapshot_corpus(references_baseline) if references_baseline is not None else None)
     try:
         vocabulary = load_vocabulary(None)
     except InputError as exc:
@@ -836,7 +846,7 @@ def validate_snapshot(snapshot, baseline=None, identity_baseline=True):
     else:
         base_identity = base
     report = evaluate(corpus, base_identity, vocabulary, 0, 0, True,
-                      references_baseline=base)
+                      references_baseline=links_base)
     if not report.ok:
         # Never echo input values, tags, arbitrary field names, or YAML parser text.
         failed = ",".join(report.json()["summary"]["failed_checks"])
