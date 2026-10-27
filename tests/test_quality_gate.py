@@ -79,6 +79,16 @@ def write_vocabulary(tmp_path):
     return path
 
 
+def case_insensitive_fs(root):
+    """Report whether ``root`` aliases names that differ only in case (Windows, macOS)."""
+    probe = root / "CaseProbe.tmp"
+    probe.write_text("", encoding="utf-8")
+    try:
+        return (root / "caseprobe.tmp").exists()
+    finally:
+        probe.unlink()
+
+
 def run(root, **options):
     options.setdefault("vocabulary", VOCAB)
     options.setdefault("expect_applications", 0)
@@ -97,6 +107,8 @@ def reviews(report, check):
 # ---------------------------------------------------------------- 1 identity
 
 def test_identity_duplicate_stem_rejected(tmp_path):
+    if case_insensitive_fs(tmp_path):
+        pytest.skip("case-only duplicate stems cannot coexist on a case-insensitive filesystem")
     root = corpus(tmp_path, {"RS100": product()})
     write(root, "Rstone/产品列表/rs100.md", product())
     report = run(root)
@@ -138,8 +150,11 @@ def test_identity_preserved_names_pass(tmp_path):
     assert report.ok, report.json()["summary"]
 
 
-def test_identity_tds_suffix_and_uniqueness(tmp_path):
-    root = corpus(tmp_path, tds={"RS100": "# RS100\n"})
+def test_identity_tds_suffix_rejected(tmp_path):
+    # Only the wrongly-cased file exists: the assertion holds on a
+    # case-insensitive filesystem too, where a correctly-cased sibling would
+    # collapse into the same directory entry.
+    root = corpus(tmp_path)
     write(root, "RstoneTDS/RS100.TDS.MD", "# RS100\n")
     report = run(root)
     assert "identity-tds-suffix" in categories(report, "identity")
