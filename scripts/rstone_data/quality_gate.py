@@ -92,7 +92,7 @@ INTERNAL_PHRASES = (
 SENTENCE = re.compile(r"[^。；;!?！？\n]+[。；;!?！？]?")
 
 FACT_UNIT = re.compile(
-    r"\d\s*(?:℃|°C|%|％|h|min|s|秒|分钟|小时|μm|um|mm|mJ|mPa·s|wt%|次|遍|kg|g/L|°|度|B|H)"
+    r"\d\s*(?:℃|°C|%|％|h|min|s|秒|分钟|小时|μm|um|mm|mJ|mPa·s|cP|wt%|次|遍|kg|g/L|°|度|B|H)"
     r"|\d+\s*[–~-]\s*\d+")
 TECHNICAL_WORDS = re.compile(
     r"体系|固化|耐[水热酸碱黄变污湿]|附着|硬度|光泽|施工|喷涂|涂布|辊涂|淋涂|基材|底材|"
@@ -113,11 +113,21 @@ BODY_ASSERTION = re.compile(
     r"[^，,。；;\n]{0,48}(?:基材|底材|底漆|面漆|涂层|涂膜|树脂|体系|固化剂|喷涂|涂布)"
     r"|(?:涂膜|涂层)\s*(?:较|很|偏|过|不|无|为|是)?"
     r"(?:柔韧|耐磨|开裂|脱落|发白|失光|发黏)"
-    r"|(?:附着|硬度|光泽|耐水|耐热|耐磨|耐湿热|柔韧)"
-    r"(?:表现|性|力)?\s*(?:较|很|偏|过|不|无|为|是)?"
-    r"(?:良好|优异|优良|不足|好|差|高|低)"
+    r"|(?:附着|硬度|光泽|耐水|耐热|耐磨|耐湿热|耐黄变|柔韧)"
+    r"(?:表现|性能|性|力)?\s*(?:较|很|偏|过|不|无|为|是)?"
+    r"(?:良好|优异|优良|不足|好|佳|差|高|低)"
     r"|(?:需要|必须|不能|不可|不宜)[^，,。；;\n]{0,32}"
     r"(?:固化剂|底漆|面漆|喷涂|涂布|固化)")
+BODY_NEGATIVE_RESULT = re.compile(
+    r"(?:未通过|未能通过|不通过)[^，,。；;\n]{0,24}(?:水煮|附着|耐水|耐磨|固化)"
+    r"|(?:附着(?:力|表现)?|粘接力|耐水性|耐磨性)(?:不足|差|不佳|不合格)")
+BODY_COMPOSITION = re.compile(r"(?:复配|混合)树脂|不含卤素|粘接力(?:好|佳|良好)"
+                              r"|(?:验证过|通过)[^，,。；;\n]{0,12}水煮")
+BODY_RECOMMENDATION = re.compile(
+    r"^工程师(?:明确)?(?:推荐|建议)(?:用于|适用于|用作)"
+    r"[^，,。；;\n]{1,64}?(?:基材|底材|底漆|面漆|涂层|固化剂)(?=[，,。；;]|但|$)")
+BODY_PENCIL = re.compile(r"(?:铅笔)?硬度\s*[:：]?\s*((?:\d{1,2}\s*[BH]|HB|[BHF])"
+                         r"(?:\s*[（(]\s*\d+\s*g\s*[)）])?)(?=[。；;，,\s]|$)", re.I)
 
 PRODUCT_PREFIX = re.compile(r"^(?:RS|RD)(?=\d)")
 PREFIX_ANY = re.compile(r"^(?:RS|RD)", re.I)
@@ -764,22 +774,8 @@ def _has_fact(text: str) -> bool:
 
 
 def _body_has_substance(body: str) -> bool:
-    heading = ""
-    for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        match = HEADING.match(stripped)
-        if match:
-            heading = stripped[match.end():].strip()
-            continue
-        content = stripped.lstrip("-*+0123456789. ").strip()
-        if not content:
-            continue
-        if FACT_UNIT.search(content):
-            return True
-        if USAGE_HEADINGS.search(heading) and len(content) >= 8:
-            return True
+    # Every body position shares the same structural and evidence filters.
+    # A heading or a unit must not bypass code/provenance/nonassertion checks.
     return _plain_body_has_fact(body)
 
 
@@ -788,10 +784,17 @@ def _body_detection_text(text: str) -> str:
     return re.sub(r"(\*{1,3}|_{1,3})(?=\S)(.*?\S)\1", r"\2", text)
 
 
-def _plain_body_has_fact(body: str) -> bool:
-    """Require an assertion in prose, leaving legacy heading/unit paths alone."""
+def _visible_fact_segments(body: str):
+    """Yield detection-only prose, excluding examples and non-product evidence.
+
+    Exclusions apply to their section/paragraph, not every fact in a product.
+    Sentence-separated independent facts remain usable; recommendations prove
+    only that recommendation, never the untested result that follows it.
+    """
     body = re.sub(r"<!--.*?(?:-->|$)", "\n", body, flags=re.S)
     fence = ""
+    inline_ticks = 0
+    quoted_paragraph = False
     excluded_level = 0
     excluded_paragraph = False
     for line in body.splitlines():
@@ -808,8 +811,10 @@ def _plain_body_has_fact(body: str) -> bool:
             continue
         if not stripped:
             excluded_paragraph = False
+            quoted_paragraph = False
             continue
-        heading = HEADING.match(stripped)
+        # Compact headings are accepted by the existing notes reader too.
+        heading = re.match(r"^(#{1,6})(?!#)\s*", stripped)
         if heading:
             level = len(heading.group(1))
             title = _body_detection_text(stripped[heading.end():].strip())
@@ -818,20 +823,49 @@ def _plain_body_has_fact(body: str) -> bool:
             if NONASSERTIONAL_BODY.search(title) or BODY_LABEL.match(title + ":"):
                 excluded_level = excluded_level or level
             excluded_paragraph = False
+            quoted_paragraph = False
             continue
-        if excluded_level or stripped.startswith(">") or "`" in stripped \
+        if stripped.startswith(">"):
+            quoted_paragraph = True
+        runs = re.findall(r"`+", stripped)
+        was_inline_code = bool(inline_ticks)
+        for run in runs:
+            if not inline_ticks:
+                inline_ticks = len(run)
+            elif len(run) == inline_ticks:
+                inline_ticks = 0
+        if excluded_level or quoted_paragraph or was_inline_code or runs \
                 or "[[" in stripped or re.search(r"\[[^]]*\]\(", stripped):
             continue
-        content = _body_detection_text(stripped).lstrip("-*+0123456789. ").strip()
+        content = re.sub(r"^(?:[-*+]\s+|\d+[.)]\s+)", "", _body_detection_text(stripped)).strip()
         if re.fullmatch(r"[\w+-]+(?:\s*[/、|]\s*[\w+-]+)+[。.]?", content):
             continue  # a bare taxonomy/keyword list, not a technical assertion
-        if NONASSERTIONAL_BODY.search(content) or BODY_LABEL.search(content) \
-                or any(pattern.search(content) for pattern in BROCHURE_PHRASES + INTERNAL_PHRASES):
-            excluded_paragraph = True
+        if excluded_paragraph:
             continue
-        if not excluded_paragraph and _has_fact(content) and BODY_ASSERTION.search(content):
-            return True
-    return False
+        for segment in re.split(r"[。!?！？]", content):
+            segment = segment.strip()
+            if not segment:
+                continue
+            if BODY_LABEL.match(segment) or any(pattern.search(segment)
+                    for pattern in BROCHURE_PHRASES + INTERNAL_PHRASES):
+                excluded_paragraph = True
+                continue
+            recommendation = BODY_RECOMMENDATION.match(segment)
+            if NONASSERTIONAL_BODY.search(segment):
+                if recommendation and not NONASSERTIONAL_BODY.search(recommendation[0]):
+                    yield recommendation[0]
+                excluded_paragraph = True
+                continue
+            yield segment
+
+
+def _plain_body_has_fact(body: str) -> bool:
+    """All positions use the same eligible prose and factual predicates."""
+    return any(FACT_UNIT.search(segment) or BODY_PENCIL.search(segment)
+               or BODY_NEGATIVE_RESULT.search(segment) or BODY_COMPOSITION.search(segment)
+               or BODY_RECOMMENDATION.match(segment)
+               or _has_fact(segment) and BODY_ASSERTION.search(segment)
+               for segment in _visible_fact_segments(body))
 
 
 def _notes_blocks(body: str) -> list[list[str]]:
@@ -881,11 +915,6 @@ def check_content(corpus: Corpus) -> list[dict]:
                 substantive = True
                 property_value = True
                 break
-        if not substantive:
-            for block in _notes_blocks(doc.body):
-                if any(_has_fact(item) for item in block if item):
-                    substantive = True
-                    break
         if not substantive and _body_has_substance(doc.body):
             substantive = True
         if not substantive:

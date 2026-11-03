@@ -170,12 +170,19 @@ def test_eligible_body_packages_its_original_markdown_bytes(store, signing, body
     "```text\n示例硬度 2H\n```",
     "##### 特别说明\n```text\n" + FACT + "\n```",
 ])
-def test_legacy_gaps_characterized_not_claimed_fixed(store, signing, body):
-    # These are inherited exceptions, deliberately not an acceptance fix here.
-    assert findings(body) == REVIEW
+def test_former_legacy_gaps_are_now_content_rejections(store, signing, body):
+    # Owner-authorized repair: the four inherited gaps that used to be
+    # characterized as publishable must now be rejected as content at the
+    # real store exit, with no artifacts and no signing side effects.
+    from rstone_data.protocol import DataError
+    from test_quality_parent_review import RecordingSigner
     from test_release_quality import clean_snapshot
+    assert findings(body) == EMPTY
     snapshot = clean_snapshot()
     snapshot.files["产品列表/RS100.md"] = (HEADER + body).encode()
-    result = store.prepare(snapshot, signing[0], public_scope_approved=True)
-    assert result["qualityGate"]["summary"]["ok"]
-    assert (store.public / store.package(result["sequence"])).is_file()
+    before = artifact_hashes(store)
+    signer = RecordingSigner(signing[0])
+    with pytest.raises(DataError, match="checks=content$"):
+        store.prepare(snapshot, signer, public_scope_approved=True)
+    assert signer.calls == 0
+    assert artifact_hashes(store) == before
