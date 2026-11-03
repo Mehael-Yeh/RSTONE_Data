@@ -70,8 +70,9 @@ def demonstrate(output):
         initial = synchronize([base], output / "client", keys, allow_local_http=True)
         publish(second)
         third = copy.deepcopy(second)
-        # A same-byte duplicate needs no new object.
-        third.files["产品列表/RS-COPY.md"] = first.files["产品列表/RS-DEMO1.md"]
+        # A same-byte external-identifier copy needs no new object. Do not add
+        # a fresh RS identity while deleting an RD without a migration receipt.
+        third.files["产品列表/X-COPY1.md"] = first.files["产品列表/RS-DEMO1.md"]
         del third.files["产品列表/RD-DEMO2.md"]
         # Two-product demo is a 50% namespace reduction, so demonstrate exact bounded approval.
         from rstone_data.build import deletion_approval, inventory

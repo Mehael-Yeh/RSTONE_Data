@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,7 +31,7 @@ import yaml
 from .price_gate import LABEL as PRICE_LABEL
 from .price_gate import MONEY as PRICE_MONEY
 from .price_gate import check_payload, check_price
-from .protocol import DataError
+from .protocol import SHA256, DataError, canonical_json, decode_json, require
 
 SCHEMA = "rstone-quality-gate/1"
 NAMESPACES = ("产品列表", "产品应用", "产品配方", "产品TDS")
@@ -97,9 +98,36 @@ TECHNICAL_WORDS = re.compile(
     r"体系|固化|耐[水热酸碱黄变污湿]|附着|硬度|光泽|施工|喷涂|涂布|辊涂|淋涂|基材|底材|"
     r"官能|粘度|固含|水煮|上镀|流平|丰满|柔韧|耐磨|耐钢丝|消光|哑光|银粉|色浆|固化剂")
 USAGE_HEADINGS = re.compile(r"用途|特性|应用|概述|物理性能|物性|使用|施工|说明")
+# Qualitative prose is an additional content path, not permission to publish
+# editorial metadata, examples or assertions explicitly marked as unverified.
+NONASSERTIONAL_BODY = re.compile(
+    r"未(?:经)?(?:验证|核验|核实|确认|实测|测试)|待(?:验证|核验|核实|确认|实测|测试)|"
+    r"尚未|推测|假设|预计|可能|尚需|示例|样例|范例|例文|例如|模板|品质优良|理想的?选择|值得信赖")
+BODY_LABEL = re.compile(
+    r"^(?:tags|标签|分类|体系|工程师|来源|资料来源|技术源|参考资料|采编(?:记录)?)\s*[:：]", re.I)
+# Ordinary prose needs an asserted use, property/result, or process constraint;
+# merely naming a technical field (however long) is not such a relation.
+BODY_ASSERTION = re.compile(
+    r"(?:^|[，,。；;])\s*(?:本(?:品|产品|号)|该(?:树脂|产品)|产品)?"
+    r"(?:可|不|不可|不宜)?(?:用于|适用于|用作|搭配|配合)"
+    r"[^，,。；;\n]{0,48}(?:基材|底材|底漆|面漆|涂层|涂膜|树脂|体系|固化剂|喷涂|涂布)"
+    r"|(?:涂膜|涂层)\s*(?:较|很|偏|过|不|无|为|是)?"
+    r"(?:柔韧|耐磨|开裂|脱落|发白|失光|发黏)"
+    r"|(?:附着|硬度|光泽|耐水|耐热|耐磨|耐湿热|柔韧)"
+    r"(?:表现|性|力)?\s*(?:较|很|偏|过|不|无|为|是)?"
+    r"(?:良好|优异|优良|不足|好|差|高|低)"
+    r"|(?:需要|必须|不能|不可|不宜)[^，,。；;\n]{0,32}"
+    r"(?:固化剂|底漆|面漆|喷涂|涂布|固化)")
 
 PRODUCT_PREFIX = re.compile(r"^(?:RS|RD)(?=\d)")
 PREFIX_ANY = re.compile(r"^(?:RS|RD)", re.I)
+IDENTITY_MIGRATIONS_SCHEMA = "rstone-identity-migrations/1"
+# Approval eligibility is deliberately narrower than RD/RS detection below:
+# canonical uppercase prefix + immediate ASCII number, then verbatim suffix.
+# Ingestible nonnumeric/space-prefixed forms are detected but fail closed when
+# requesting migration credit; they are never silently exempted from review.
+MIGRATABLE_RD = re.compile(r"RD[0-9]+.*", re.S)
+NUMBERED_IDENTITY = re.compile(r"([^0-9]*[0-9]+)(.*)", re.S)
 
 
 class InputError(Exception):
@@ -238,6 +266,27 @@ def default_vocabulary() -> Path:
     return Path(__file__).resolve().parents[2] / "config" / "quality_vocabulary.json"
 
 
+def default_identity_migrations() -> Path:
+    # Publisher-owned policy, never read from source documents, Snapshot metadata,
+    # dispatch payloads or an operator-controlled source-directory argument.
+    return Path(__file__).resolve().parents[2] / "config" / "identity_migrations.json"
+
+
+def load_identity_migrations() -> frozenset[str]:
+    try:
+        payload = decode_json(default_identity_migrations().read_bytes())
+        require(isinstance(payload, dict) and set(payload) == {"schema", "approvals"}
+                and payload["schema"] == IDENTITY_MIGRATIONS_SCHEMA,
+                "invalid identity migration policy")
+        approvals = payload["approvals"]
+        require(isinstance(approvals, list) and all(isinstance(item, str)
+                and SHA256.fullmatch(item) for item in approvals)
+                and len(set(approvals)) == len(approvals), "invalid identity migration approvals")
+        return frozenset(approvals)
+    except (OSError, DataError) as exc:
+        raise InputError("identity migration policy unavailable") from exc
+
+
 def load_vocabulary(source) -> frozenset[str]:
     if isinstance(source, (set, frozenset)):
         return frozenset(source)
@@ -372,7 +421,83 @@ def _review(path: str, category: str, field: str | None = None) -> dict:
 
 # --------------------------------------------------------------------- checks
 
-def check_identity(corpus: Corpus, baseline: Corpus | None) -> list[dict]:
+def _retained_migrations(corpus: Corpus, baseline: Corpus,
+                        approvals: frozenset[str]) -> set[str]:
+    """Credit only individually approved, byte-bound, injective RD -> RS moves.
+
+    The experimental field is a consistency check, NOT an authorization. The
+    reviewed publisher policy must also approve the exact source/target bytes
+    against the entire current baseline inventory. No business IDs live here.
+    """
+    if not approvals:
+        return set()
+    before = baseline.by_namespace("产品列表")
+    after = corpus.by_namespace("产品列表")
+    baseline_digest = hashlib.sha256(canonical_json(
+        {doc.path: doc.sha256 for doc in baseline.documents})).hexdigest()
+    retained: set[str] = set()
+    for source in before:
+        if not MIGRATABLE_RD.fullmatch(source.stem):
+            continue
+        if any(doc.stem.casefold() == source.stem.casefold() for doc in after):
+            continue  # Retaining/moving an RD is not a disappearing identity.
+        if sum(doc.stem.casefold() == source.stem.casefold() for doc in before) != 1:
+            continue
+        claims = [doc for doc in after
+                  if (doc.frontmatter or {}).get("实验牌号") == source.stem]
+        if len(claims) != 1:
+            continue  # No missing/list/approximate aliases, conflicting claims or many-to-one.
+        target = claims[0]
+        if not MIGRATABLE_RD.fullmatch("RD" + target.stem[2:]) \
+                or not target.stem.startswith("RS") \
+                or Path(source.path).parent != Path(target.path).parent \
+                or sum(doc.stem.casefold() == target.stem.casefold() for doc in after) != 1:
+            continue
+        # Changing only the prefix must keep EVERY suffix byte. A different
+        # number is never inferred: it needs its own exact owner fingerprint.
+        if re.match(r"\d+", source.stem[2:])[0] == re.match(r"\d+", target.stem[2:])[0] \
+                and source.stem[2:] != target.stem[2:]:
+            continue
+        fingerprint = hashlib.sha256(canonical_json({
+            "schema": IDENTITY_MIGRATIONS_SCHEMA,
+            "baselineSha256": baseline_digest,
+            "source": {"path": source.path, "sha256": source.sha256},
+            "target": {"path": target.path, "sha256": target.sha256},
+        })).hexdigest()
+        if fingerprint in approvals:
+            retained.add(source.stem)
+    return retained
+
+
+def _numbered_identity(stem: str):
+    # Use exactly the ingress prefix boundary, including Unicode upper-case
+    # expansions. Extract from the ORIGINAL spelling; never normalize its bytes.
+    return NUMBERED_IDENTITY.fullmatch(stem) if stem.upper().startswith(("RD", "RS")) else None
+
+
+def _identity_family(stem: str) -> str:
+    numbered = _numbered_identity(stem)
+    return (numbered[1] if numbered is not None else stem.split("-")[0]).casefold()
+
+
+def _suffix_shortened(original: str, candidate: str) -> bool:
+    """Compare suffixes only after matching the entire numbered base.
+
+    RD94 and RD9402 are distinct bases. Dots, letters, versions, spaces and
+    symbols are suffix bytes, not a reason to skip the loss check. Unnumbered
+    legacy names retain their existing hyphen boundary.
+    """
+    old = _numbered_identity(original)
+    new = _numbered_identity(candidate)
+    if old is not None and new is not None:
+        old_suffix, new_suffix = old[2].casefold(), new[2].casefold()
+        return (old[1].casefold() == new[1].casefold()
+                and old_suffix != new_suffix and old_suffix.startswith(new_suffix))
+    return original.casefold().startswith(candidate.casefold() + "-")
+
+
+def check_identity(corpus: Corpus, baseline: Corpus | None,
+                   approvals: frozenset[str] = frozenset()) -> list[dict]:
     violations: list[dict] = list(corpus.stray)
     for namespace in NAMESPACES:
         seen: dict[str, str] = {}
@@ -392,10 +517,48 @@ def check_identity(corpus: Corpus, baseline: Corpus | None) -> list[dict]:
         if stem != stem.strip() or stem.endswith("-"):
             violations.append({"path": doc.path, "category": "identity-malformed"})
     if baseline is not None:
+        migrated = _retained_migrations(corpus, baseline, approvals)
+        current_products = corpus.by_namespace("产品列表")
+        current_stems = {doc.stem for doc in current_products}
+        baseline_stems = set(baseline.stems("产品列表"))
+        # Ingestion accepts every RD/RS-prefixed spelling, not only the subset
+        # eligible for an approval. Classification must never hide a migration;
+        # case folding here does not rewrite any identity or receipt bytes.
+        added_formal = [doc for doc in current_products
+                        if doc.stem not in baseline_stems and doc.stem.upper().startswith("RS")]
+        deleted_formal = [doc for doc in baseline.by_namespace("产品列表")
+                          if doc.stem not in current_stems and doc.stem.upper().startswith("RS")]
+        added_hashes = Counter(doc.sha256 for doc in added_formal)
+        deleted_hashes = Counter(doc.sha256 for doc in deleted_formal)
+        # A provable one-to-one byte-identical RS move is not a fresh RD -> RS
+        # replacement. This preserves existing ordinary moves/deletions without
+        # granting RD migration credit or bypassing suffix-family checks.
+        new_formal = any(added_hashes[doc.sha256] != 1 or deleted_hashes[doc.sha256] != 1
+                         for doc in added_formal)
+        for source in baseline.by_namespace("产品列表"):
+            if not source.stem.upper().startswith("RD") or source.stem in current_stems:
+                continue
+            # Even a singleton must not self-authorize by declaring its old RD
+            # as an alias. Same-number replacements also require the field and
+            # policy, so omitting or corrupting the field cannot bypass approval.
+            # An undeclared RD deletion + fresh RS addition is ambiguous, not
+            # evidence of an unrelated change. Require explicit review instead
+            # of allowing the alias to be omitted to hide a renumbering.
+            if source.stem not in migrated and (new_formal or any(
+                    (doc.frontmatter or {}).get("实验牌号") == source.stem
+                    or doc.stem == "RS" + source.stem[2:]
+                    for doc in current_products)):
+                violations.append({"path": source.path,
+                                   "category": "identity-migration-unapproved"})
         for namespace in NAMESPACES:
             before = baseline.stems(namespace)
             after = {doc.stem for doc in corpus.by_namespace(namespace)}
             folded = {stem.casefold(): stem for stem in before}
+            # Adding an independent base is not a suffix deletion if every old
+            # identity still exists verbatim or has its own exact RD -> RS
+            # receipt. Credit is product-only; other namespaces get no migration
+            # exemption. Never infer coverage from counts or a shorter prefix.
+            uncovered = set(before) - after - (migrated if namespace == "产品列表" else set())
             for doc in corpus.by_namespace(namespace):
                 stem = doc.stem
                 if stem in before:
@@ -405,20 +568,21 @@ def check_identity(corpus: Corpus, baseline: Corpus | None) -> list[dict]:
                     violations.append({"path": doc.path,
                                        "category": "identity-case-rewritten"})
                     continue
-                if any(other.casefold().startswith(stem.casefold() + "-") for other in before):
+                if any(_suffix_shortened(other, stem) for other in uncovered):
                     violations.append({"path": doc.path,
                                        "category": "identity-suffix-dropped"})
             if namespace == "产品列表":
-                base_before: dict[str, int] = {}
-                base_after: dict[str, int] = {}
+                families: dict[str, set[str]] = {}
                 for stem in before:
-                    base_before[stem.split("-")[0].casefold()] = \
-                        base_before.get(stem.split("-")[0].casefold(), 0) + 1
-                for stem in after:
-                    base_after[stem.split("-")[0].casefold()] = \
-                        base_after.get(stem.split("-")[0].casefold(), 0) + 1
-                for base, count in base_before.items():
-                    if count > 1 and base_after.get(base, 0) < count:
+                    families.setdefault(_identity_family(stem), set()).add(stem)
+                after_families = {_identity_family(stem) for stem in after}
+                for base, members in families.items():
+                    # Count equality is not identity coverage: unrelated new
+                    # suffixes must not mask loss of an old complete suffix.
+                    # Even a singleton cannot be replaced by another suffix of
+                    # the same numbered base. Pure singleton deletions and
+                    # unrelated one-to-one RS moves keep their existing boundary.
+                    if members - after - migrated and (len(members) > 1 or base in after_families):
                         violations.append({"path": f"产品列表/{base}",
                                            "category": "identity-suffix-merged"})
     return violations
@@ -615,6 +779,57 @@ def _body_has_substance(body: str) -> bool:
         if FACT_UNIT.search(content):
             return True
         if USAGE_HEADINGS.search(heading) and len(content) >= 8:
+            return True
+    return _plain_body_has_fact(body)
+
+
+def _body_detection_text(text: str) -> str:
+    """Remove paired Markdown emphasis only in a disposable detection string."""
+    return re.sub(r"(\*{1,3}|_{1,3})(?=\S)(.*?\S)\1", r"\2", text)
+
+
+def _plain_body_has_fact(body: str) -> bool:
+    """Require an assertion in prose, leaving legacy heading/unit paths alone."""
+    body = re.sub(r"<!--.*?(?:-->|$)", "\n", body, flags=re.S)
+    fence = ""
+    excluded_level = 0
+    excluded_paragraph = False
+    for line in body.splitlines():
+        stripped = line.strip()
+        if fence:
+            if re.fullmatch(re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*", stripped):
+                fence = ""
+            continue
+        if line.startswith(("    ", "\t")):
+            continue
+        opening = re.match(r"(`{3,}|~{3,})", stripped)
+        if opening:
+            fence = opening.group(1)
+            continue
+        if not stripped:
+            excluded_paragraph = False
+            continue
+        heading = HEADING.match(stripped)
+        if heading:
+            level = len(heading.group(1))
+            title = _body_detection_text(stripped[heading.end():].strip())
+            if excluded_level and level <= excluded_level:
+                excluded_level = 0
+            if NONASSERTIONAL_BODY.search(title) or BODY_LABEL.match(title + ":"):
+                excluded_level = excluded_level or level
+            excluded_paragraph = False
+            continue
+        if excluded_level or stripped.startswith(">") or "`" in stripped \
+                or "[[" in stripped or re.search(r"\[[^]]*\]\(", stripped):
+            continue
+        content = _body_detection_text(stripped).lstrip("-*+0123456789. ").strip()
+        if re.fullmatch(r"[\w+-]+(?:\s*[/、|]\s*[\w+-]+)+[。.]?", content):
+            continue  # a bare taxonomy/keyword list, not a technical assertion
+        if NONASSERTIONAL_BODY.search(content) or BODY_LABEL.search(content) \
+                or any(pattern.search(content) for pattern in BROCHURE_PHRASES + INTERNAL_PHRASES):
+            excluded_paragraph = True
+            continue
+        if not excluded_paragraph and _has_fact(content) and BODY_ASSERTION.search(content):
             return True
     return False
 
@@ -834,7 +1049,7 @@ def evaluate(corpus, base_corpus, allowed, expect_recipes, expect_applications,
     report.counts["documents"] = len(corpus.documents)
 
     report.add(1, "identity", len(corpus.documents),
-               check_identity(corpus, base_corpus))
+               check_identity(corpus, base_corpus, load_identity_migrations()))
     report.add(2, "tags", sum(1 for doc in corpus.documents
                               if doc.namespace in ("产品列表", "产品应用")),
                check_tags(corpus, allowed))
@@ -890,8 +1105,11 @@ def validate_snapshot(snapshot, baseline=None, identity_baseline=True, reference
         base_identity = None
     else:
         base_identity = base
-    report = evaluate(corpus, base_identity, vocabulary, 0, 0, True,
-                      references_baseline=links_base)
+    try:
+        report = evaluate(corpus, base_identity, vocabulary, 0, 0, True,
+                          references_baseline=links_base)
+    except InputError as exc:
+        raise DataError("public quality gate configuration unavailable") from exc
     if not report.ok:
         # Never echo input values, tags, arbitrary field names, or YAML parser text.
         failed = ",".join(report.json()["summary"]["failed_checks"])
