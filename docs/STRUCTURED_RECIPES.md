@@ -1,6 +1,10 @@
 # 统一配方协议：Python 发布器
 
-本实现消费父冻结的 `rstone-recipe/1` 十键模型和 `rstone-recipe-markdown/1` renderer。不是 Markdown 自动转换器，也不是发布批准。
+本实现严格消费 `rstone-recipe/1` + `rstone-recipe-markdown/1` 和 `rstone-recipe/2` + `rstone-recipe-markdown/2` 两个显式配对，十键模型不变。`SCHEMA`/`RENDERER` 保留旧值；新调用使用 `SCHEMA_V2`/`RENDERER_V2` 和 `renderer_for(model)`，不做失败后版本回退。不是 Markdown 自动转换器，也不是发布批准。
+
+/2 仅在原料第0格按从左至右首 opening/首 closing 扫描，保留精确关联且匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` 的 wiki token，并仅在派生正文中输出固定产品目录 `[[产品列表/exact-target]]`（首次发布前 revision002 定稿，无 pipe/alias）；模型原串仍为 `[[exact-target]]`，输入自带路径不升级。嵌入式与多个 token 可用。未知、alias、路径、nested、三括号、反斜杠转义、HTML、换行等全部按普通文字逐字符实体编码，非法外层不重扫内层。其他位置保持 /1 编码。/1 emitter 字节不变。
+
+/2 的 `make_manifest` 和所有 Store 发布出口硬拒 `minAppVersion < 2.0.5`，先拒后签，不静默提升；全 /1 默认行为不变。工作流 `prepare` 沿用 CLI 固定 `config/release.json`，其最低版本已设为 2.0.5；必须先发布支持 /2 的 App。witness 仅接受上述两个配对，并匹配实际 after catalog 所需最高版本；混合 /1、/2 的事务元数据为 /2，全 /1 历史 payload 不变。proof 仍不是批准，策略注册表未安装任何新批准。
 
 ## 正常发布
 

@@ -49,8 +49,11 @@ def load_approvals():
 
 def validate_witness(witness):
     require(type(witness) is dict and set(witness) == WITNESS_KEYS, "invalid migration witness")
-    require(witness["schema"] == WITNESS_SCHEMA and witness["protocol"] == codec.SCHEMA
-            and witness["renderer"] == codec.RENDERER, "invalid migration witness version")
+    require(witness["schema"] == WITNESS_SCHEMA
+            and type(witness["protocol"]) is str
+            and witness["protocol"] in codec.VERSION_PAIRS
+            and witness["renderer"] == codec.VERSION_PAIRS[witness["protocol"]],
+            "invalid migration witness version")
     for key in WITNESS_KEYS - {"schema", "protocol", "renderer", "records"}:
         require(type(witness[key]) is str and SHA256.fullmatch(witness[key]), "invalid migration witness digest")
     records = witness["records"]
@@ -114,12 +117,21 @@ def _safe_candidate(before, after):
     return True
 
 
+def document_versions(corpus):
+    """Highest required document version; all-v1 payloads retain historical bytes."""
+    models = [model_for(doc) for doc in corpus.by_namespace("产品配方")]
+    schema = (codec.SCHEMA_V2 if any(m is not None and m["schema"] == codec.SCHEMA_V2
+                                   for m in models) else codec.SCHEMA)
+    return schema, codec.VERSION_PAIRS[schema]
+
+
 def _matching_witness(before, after, witnesses, prior_approvals):
     before_digest = sha256(canonical_json(inventory(before)))
     after_inventory = inventory(after)
     after_digest = sha256(canonical_json(after_inventory))
     for digest, proof in witnesses:
-        if (proof["sourceCatalogApprovalFingerprint"] not in prior_approvals
+        if ((proof["protocol"], proof["renderer"]) != document_versions(after)
+                or proof["sourceCatalogApprovalFingerprint"] not in prior_approvals
                 or proof["baselineManifestSha256"] != before.manifest_sha256
                 or proof["beforeInventorySha256"] != before_digest
                 or proof["typedInventorySha256"] != after_digest):
@@ -170,9 +182,10 @@ def eligible_scope(before, after, findings, witnesses, prior_approvals):
 
 
 def transaction_payload(before, after, scope, witness_sha256):
+    protocol, renderer = document_versions(after)
     return {"schema": SCHEMA, "before": inventory(before), "after": inventory(after),
             "baselineManifestSha256": before.manifest_sha256,
-            "protocol": codec.SCHEMA, "renderer": codec.RENDERER,
+            "protocol": protocol, "renderer": renderer,
             "migrationWitnessSha256": witness_sha256,
             "scope": sorted([{"category": f["category"], "path": f["path"]} for f in scope],
                             key=lambda f: (f["category"], f["path"]))}

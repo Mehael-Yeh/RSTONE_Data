@@ -82,8 +82,11 @@ class Store:
             if verify_objects:
                 for record in manifest["files"]:
                     validate_markdown(record["path"], self.object(record))
+                from .build import require_recipe_minimum
+                snapshot = self._snapshot(manifest)
+                require_recipe_minimum(snapshot, manifest["minAppVersion"])
                 if manifest["schemaVersion"] == 2:
-                    self._require_structured(self._snapshot(manifest))
+                    self._require_structured(snapshot)
             return manifest
         except OSError as exc:
             raise DataError("release resource missing or unreadable") from exc
@@ -223,6 +226,8 @@ class Store:
         return baseline_sequence, summary, bound
 
     def _release_quality(self, manifest, baseline_sequence=_INFER):
+        from .build import require_recipe_minimum
+        require_recipe_minimum(self._snapshot(manifest), manifest["minAppVersion"])
         baseline_sequence, summary, bound = self._quality_context(manifest, baseline_sequence)
         baseline = self._signed_snapshot(baseline_sequence) if baseline_sequence is not None else None
         links_baseline = baseline
