@@ -51,10 +51,29 @@ def check_deletions(previous, records, maximum=0.25, approval=None):
         require(approval == expected, "abnormal bulk deletion; exact approval required: " + expected)
 
 
+def require_recipe_minimum(snapshot, min_app_version):
+    from .recipe_codec import parse, SCHEMA_V2
+    from .client import version_tuple
+    needs_v2 = False
+    for path, raw in snapshot.files.items():
+        if path.startswith("产品配方/") and raw.startswith(b'---\n{'):
+            try:
+                needs_v2 = parse(raw)["schema"] == SCHEMA_V2 or needs_v2
+            except ValueError:
+                # make_manifest historically inventories malformed /1 fixtures;
+                # Store validates every document before reaching this builder.
+                continue
+    if needs_v2:
+        require(version_tuple(min_app_version) >= (2, 0, 5),
+                "rstone-recipe/2 requires minAppVersion >= 2.0.5")
+    return needs_v2
+
+
 def make_manifest(snapshot, sequence, data_version, published_at, key_id, min_app_version="1.0.0",
                   rollback_of=None):
+    needs_v2 = require_recipe_minimum(snapshot, min_app_version)
     manifest = {
-        "protocolVersion": 1, "schemaVersion": 1, "sequence": sequence,
+        "protocolVersion": 1, "schemaVersion": 2 if needs_v2 else 1, "sequence": sequence,
         "dataVersion": data_version, "publishedAt": published_at, "keyId": key_id,
         "minAppVersion": min_app_version, "sourceCommits": snapshot.commits,
         "files": inventory(snapshot.files),

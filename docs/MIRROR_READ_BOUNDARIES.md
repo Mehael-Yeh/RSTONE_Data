@@ -1,0 +1,7 @@
+# Mirror and read boundary correction
+
+`Store.read()` verifies object bytes and then applies the existing recipe minimum-client rule to the full snapshot. This is not a general historical quality re-admission. `verify_objects=False` remains explicit metadata/signature-only reading and does not check semantic minimums. Legacy Markdown and structured recipe /1 are not assigned the /2 client floor.
+
+Mirror preflight classifies recipe-namespace object bytes using `sources.structured_marker`, not successful model decoding and not only outer manifest schema. Structured presence invokes the existing release quality authority; an outer schema1 release without exact signed restore authority cannot claim a legacy exemption for structured content. Truly old marker-free schema1 history remains copied under its original signatures. All outgoing generations are preflighted before acquiring the target lock or writing any target object, signature, manifest or latest pointer.
+
+The first RED reproduces four independent boundary failures. After read correction those 22 cases pass. A second RED at minimum 2.0.5 reproduces the remaining outer1 structured bypass both as latest and inside a three-generation history. Corrupt display, unknown schema and escaped JSON marker cases were already rejected by real object validation; they are controls, not claimed new REDs. Synthetic loopback tests verify unchanged entire target/source trees and no new signing calls, plus byte-exact successful old-history mirroring and HTTP readback.

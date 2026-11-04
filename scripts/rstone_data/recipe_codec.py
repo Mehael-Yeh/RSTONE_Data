@@ -8,6 +8,16 @@ import re
 
 SCHEMA = 'rstone-recipe/1'
 RENDERER = 'rstone-recipe-markdown/1'
+SCHEMA_V2 = 'rstone-recipe/2'
+RENDERER_V2 = 'rstone-recipe-markdown/2'
+VERSION_PAIRS = {SCHEMA: RENDERER, SCHEMA_V2: RENDERER_V2}
+
+
+def renderer_for(model):
+    require(type(model) is dict and type(model.get('schema')) is str
+            and model['schema'] in VERSION_PAIRS)
+    return VERSION_PAIRS[model['schema']]
+
 KEYS = frozenset(['schema', 'recipeId', 'title', 'classification', 'ownerProduct',
                   'associatedProducts', 'columns', 'rows', 'preTable', 'content'])
 COLUMNS = [['原料编号', '投入数(g)', '百分比(%)', '供应商', '备注'],
@@ -40,7 +50,7 @@ def validate(model):
     require(type(model) is dict and set(model) == KEYS)
     for key in ['schema', 'recipeId', 'title', 'classification', 'ownerProduct']:
         require(valid_string(model[key]) and bool(model[key]))
-    require(model['schema'] == SCHEMA)
+    renderer_for(model)
     require(re.fullmatch(r'[A-Za-z0-9._-]{1,128}', model['recipeId']) is not None)
     require(model['classification'] in ['main', 'example', 'reference', 'unverified'])
     require(type(model['columns']) is list and model['columns'] in COLUMNS)
@@ -71,6 +81,28 @@ def entity_text(value):
     return ''.join('&#x%x;' % ord(c) for c in value)
 
 
+def ingredient_text(value, associated):
+    """Scan once; an invalid outer candidate never exposes an inner token."""
+    parts = []
+    cursor = 0
+    while True:
+        opening = value.find('[[', cursor)
+        closing = value.find(']]', opening + 2) if opening >= 0 else -1
+        if closing < 0:
+            parts.append(entity_text(value[cursor:]))
+            return ''.join(parts)
+        parts.append(entity_text(value[cursor:opening]))
+        end = closing + 2
+        target = value[opening + 2:closing]
+        valid = (re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', target) is not None
+                 and target in associated
+                 and (opening == 0 or value[opening - 1] not in '[\\\\')
+                 and (end == len(value) or value[end] != ']'))
+        candidate = value[opening:end]
+        parts.append('[[产品列表/' + target + ']]' if valid else entity_text(candidate))
+        cursor = end
+
+
 def body(model):
     lines = ['# ' + entity_text(model['title'])]
     for paragraph in model['preTable']:
@@ -78,7 +110,10 @@ def body(model):
     lines += ['', '## 配方',
               '| ' + ' | '.join(entity_text(x) for x in model['columns']) + ' |',
               '| --- | --- | --- | --- | --- |']
-    lines += ['| ' + ' | '.join(entity_text(x) for x in row) + ' |' for row in model['rows']]
+    for row in model['rows']:
+        first = (ingredient_text(row[0], model['associatedProducts'])
+                 if model['schema'] == SCHEMA_V2 else entity_text(row[0]))
+        lines += ['| ' + ' | '.join([first] + [entity_text(x) for x in row[1:]]) + ' |']
     for block in model['content']:
         if block['kind'] == 'note':
             lines += ['', entity_text(block['text'])]

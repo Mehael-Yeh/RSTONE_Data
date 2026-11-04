@@ -3,6 +3,7 @@
 from .protocol import decode_json, manifest_name, require
 from .release import Store, pointer_for
 from .storage import ReleaseLock, atomic_write, immutable_write
+from .sources import structured_marker
 from .transport import fetch_release
 
 
@@ -27,7 +28,10 @@ def deploy_mirror(source, target, base_url, keys, allow_local_http=False):
         manifest = decode_json(raw)
         historical_pointer = pointer_for(manifest, raw)
         store.read(historical_pointer)
-        if manifest["schemaVersion"] == 2:
+        # Presence, not successful model parsing, determines structured authority.
+        structured = any(record["path"].startswith("产品配方/") and
+                         structured_marker(store.object(record)) for record in manifest["files"])
+        if manifest["schemaVersion"] == 2 or structured:
             store._release_quality(manifest)
         outgoing.append((path, raw, manifest, historical_pointer))
     # target is already the public directory, not a publisher store.

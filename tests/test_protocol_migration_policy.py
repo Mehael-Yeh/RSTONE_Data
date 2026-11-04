@@ -104,8 +104,31 @@ def test_witness_or_approval_is_never_reusable_for_other_bytes(store, signing, m
     assert signer.calls == 0 and original == artifacts(store)
 
 
-def test_installed_new_policies_are_empty_fixed_and_strict():
+def test_installed_new_policies_are_fixed_strict_and_loaded_exactly():
+    from rstone_data.protocol import decode_json, SHA256
     v2 = api(); root = Path(v2.__file__).resolve().parents[2]/"config"
     assert v2.config_root() == root
-    assert v2.load_approvals() == frozenset()
-    assert v2.load_witnesses() == ()
+    installed = {}
+    for filename, schema, key in [
+        ("catalog_revisions.json", "rstone-catalog-revisions/1", "approvals"),
+        ("catalog_revisions_v2.json", v2.SCHEMA, "approvals"),
+        ("recipe_migration_witnesses.json", v2.WITNESSES_SCHEMA, "witnesses"),
+    ]:
+        data = decode_json((root / filename).read_bytes())
+        assert type(data) is dict and set(data) == {"schema", key}
+        assert data["schema"] == schema and type(data[key]) is list
+        assert all(type(value) is str and SHA256.fullmatch(value) for value in data[key])
+        assert len(set(data[key])) == len(data[key])
+        installed[filename] = frozenset(data[key])
+    assert q.load_catalog_revisions() == installed["catalog_revisions.json"]
+    assert v2.load_approvals() == installed["catalog_revisions_v2.json"]
+    witnesses = v2.load_witnesses()
+    assert frozenset(digest for digest, _ in witnesses) == installed["recipe_migration_witnesses.json"]
+    assert len(witnesses) == len(installed["recipe_migration_witnesses.json"])
+    for digest, witness in witnesses:
+        raw = (root / "migration_witnesses" / (digest + ".json")).read_bytes()
+        assert sha256(raw) == digest
+        assert v2.validate_witness(decode_json(raw)) == witness
+        assert witness["renderer"] == codec.VERSION_PAIRS[witness["protocol"]]
+        assert witness["sourceCatalogApprovalFingerprint"] in q.load_catalog_revisions()
+        assert digest not in v2.load_approvals()
