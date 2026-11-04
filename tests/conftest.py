@@ -36,7 +36,7 @@ def sources(tmp_path):
         "产品列表/RS100.md": "---\ntags: [水性, UV]\n固含: 77\n---\n# RS100\r\n".encode(),
         "产品列表/RD200.md": "---\ntags: [水性, PU]\n固含: 77\n---\n# RD200\n".encode(),
         "产品应用/方案.md": '---\ntags: [PC]\n底漆: "[[RS100]]"\n---\n'.encode(),
-        "产品配方/RS100-配方.md": b"| A | B |\n| - | - |\n| RS100 | 100 |\n",
+        "产品配方/RS100-底.md": __import__("recipe_fixtures").typed("RS100", "RS100-底"),
     }
     for name, raw in data.items():
         target = rstone / name

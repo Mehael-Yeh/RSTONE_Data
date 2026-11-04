@@ -12,7 +12,11 @@ from rstone_data.sources import Snapshot, collect
 
 
 def publish(store, snapshot, signer, **kwargs):
-    result = store.prepare(snapshot, signer, public_scope_approved=True, max_deletion_fraction=0.99, **kwargs)
+    from rstone_data.build import deletion_approval
+    previous = store.read()
+    if previous and "approval" not in kwargs:
+        kwargs["approval"] = deletion_approval(previous, inventory(snapshot.files))
+    result = store.prepare(snapshot, signer, public_scope_approved=True, **kwargs)
     if result["status"] != "unchanged":
         result = store.promote()
     return result
@@ -54,12 +58,12 @@ def test_add_modify_delete_and_full_latest(store, sources, signing):
     assert len(list((store.public / "objects").iterdir())) == 7
 
 
-@pytest.mark.parametrize("old,new", [("产品列表/RS100.md", "产品列表/RS101.md"),
+@pytest.mark.parametrize("old,new", [("产品列表/RD200.md", "产品列表/RD201.md"),
                                      ("产品应用/方案.md", "产品应用/PC/方案.md")])
 def test_rename_move_reuses_objects(store, sources, signing, old, new):
     first = collect(*sources)
     # Rename an unreferenced product; breaking a real attachment is now rejected.
-    first.files["产品应用/方案.md"] = first.files["产品应用/方案.md"].replace(b"RS100", b"RD200")
+    assert b"RD200" not in first.files["产品应用/方案.md"]
     publish(store, first, signing[0])
     second = changed(first, new, first.files[old])
     second = changed(second, old)
@@ -98,10 +102,10 @@ def test_scope_key_and_signature_fail_closed(store, sources, signing):
     raw = (store.public / pointer["manifestPath"]).read_bytes()
     signature = (store.public / pointer["signaturePath"]).read_bytes()
     assert verify_release(pointer, raw, signature, signing[1])["sequence"] == 1
-    tampered = raw.replace(b'"schemaVersion":1', b'"schemaVersion":2')
+    tampered = raw.replace(b'"schemaVersion":2', b'"schemaVersion":3')
     with pytest.raises(DataError):
         verify_release(pointer, tampered, signature, signing[1])
-    tampered = raw.replace(b'"1.0.0"', b'"1.0.1"')
+    tampered = raw.replace(b'"2.0.2"', b'"2.0.3"')
     changed_pointer = dict(pointer, manifestSha256=sha256(tampered))
     with pytest.raises(DataError, match="signature"):
         verify_release(changed_pointer, tampered, signature, signing[1])

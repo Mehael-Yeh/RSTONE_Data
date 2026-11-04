@@ -131,7 +131,7 @@ def test_exact_regressions_rejected_at_six_real_exits_with_no_effect(store, sign
     assert q.check_content(q.snapshot_corpus(snapshot)) == [
         {"path": "产品列表/RS100.md", "category": "empty_product", "severity": "failure"}]
     if operation != "prepare":
-        install_legacy(store, signing[0], snapshot, pending=operation in ("resume", "promote", "complete"))
+        install_legacy(store, signing[0], snapshot, pending=operation in ("resume", "promote", "complete"), schema_version=2)
     before = artifact_hashes(store)
     signer, verified = RecordingSigner(signing[0]), []
     with pytest.raises(DataError, match="checks=content"):

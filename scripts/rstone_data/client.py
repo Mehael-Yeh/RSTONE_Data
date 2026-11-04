@@ -46,11 +46,19 @@ def _active(cache, keys):
 
 def _complete_tree(directory, manifest):
     try:
+        files = {}
         for record in manifest["files"]:
             raw = safe_file(directory, "files/" + record["path"]).read_bytes()
             if len(raw) != record["size"] or sha256(raw) != record["sha256"]:
                 return False
             validate_markdown(record["path"], raw)
+            files[record["path"]] = raw
+        if manifest["schemaVersion"] == 2:
+            from .quality_gate import snapshot_corpus
+            from .recipe_catalog import check_catalog
+            from .sources import Snapshot
+            if check_catalog(snapshot_corpus(Snapshot(files, manifest["sourceCommits"])), required=True):
+                return False
         return True
     except OSError:
         return False
