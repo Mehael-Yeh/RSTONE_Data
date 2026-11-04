@@ -12,7 +12,7 @@ def clean_snapshot():
     return Snapshot({
         "产品列表/RS100.md": "---\ntags: [水性, UV, 3官]\n官能度: 3\n固含: 77\n---\n".encode(),
         "产品应用/方案.md": "---\ntags: [PC]\n底漆: '[[RS100]]'\n---\n".encode(),
-        "产品配方/配方.md": b"| RS100 | 100 |\n",
+        "产品配方/RS100-底.md": __import__("recipe_fixtures").typed("RS100", "RS100-底"),
         "产品TDS/RS100.TDS.md": b"# RS100\n",
     }, {"Mehael-Yeh/Rstone": "a" * 40, "Mehael-Yeh/RstoneTDS": "b" * 40})
 
@@ -63,7 +63,7 @@ def test_new_application_frontmatter_link_blocks(store, signing):
         store.prepare(snapshot, signing[0], public_scope_approved=True)
 
 
-def install_legacy(store, signer, snapshot, sequence=1, pending=False):
+def install_legacy(store, signer, snapshot, sequence=1, pending=False, schema_version=1):
     """Construct a real signed pre-gate release; no validation function is mocked."""
     from datetime import datetime, timezone
     from rstone_data.build import make_manifest
@@ -71,6 +71,9 @@ def install_legacy(store, signer, snapshot, sequence=1, pending=False):
     from rstone_data.release import pointer_for
     from rstone_data.storage import atomic_write
     manifest = make_manifest(snapshot, sequence, "2026.01.01.001", "2026-01-01T00:00:00Z", signer.key_id)
+    manifest["schemaVersion"] = schema_version
+    if schema_version == 2:
+        manifest["minAppVersion"] = "2.0.2"
     raw = canonical_json(manifest)
     pointer = pointer_for(manifest, raw)
     for data in snapshot.files.values():
@@ -79,7 +82,8 @@ def install_legacy(store, signer, snapshot, sequence=1, pending=False):
     atomic_write(store.public / pointer["signaturePath"], signer.sign(raw))
     if pending:
         atomic_write(store.state / "pending.json", canonical_json({"pointer": pointer,
-                     "previousLatestSha256": None, "summary": {"sequence": sequence}}))
+                     "previousLatestSha256": sha256(store.latest_bytes()) if store.latest_bytes() is not None else None,
+                     "summary": {"sequence": sequence}}))
     else:
         atomic_write(store.public / "latest.json", canonical_json(pointer))
     return pointer
@@ -107,13 +111,13 @@ def test_legacy_signed_defect_cannot_escape(store, signing, operation):
 
 def test_historical_warning_does_not_allow_new_link(store, signing):
     old = clean_snapshot()
-    old.files["产品配方/配方.md"] += b"[[RS999999]]\n"
+    old.files["产品TDS/RS100.TDS.md"] += b"[[RS999999]]\n"
     install_legacy(store, signing[0], old)
     candidate = clean_snapshot()
-    candidate.files["产品配方/配方.md"] += b"[[RS999999]]\n[[RS888888]]\n"
+    candidate.files["产品TDS/RS100.TDS.md"] += b"[[RS999999]]\n[[RS888888]]\n"
     with pytest.raises(DataError, match="quality gate"):
         store.prepare(candidate, signing[0], public_scope_approved=True)
-    candidate.files["产品配方/配方.md"] = old.files["产品配方/配方.md"]
+    candidate.files["产品TDS/RS100.TDS.md"] = old.files["产品TDS/RS100.TDS.md"]
     result = store.prepare(candidate, signing[0], public_scope_approved=True)
     assert result["qualityGate"]["summary"]["ok"]
     historical = [w for w in result["qualityGate"]["warnings"]

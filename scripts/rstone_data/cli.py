@@ -107,7 +107,8 @@ def execute(args):
         if store.pending():
             return store.prepare(None, signer, public_scope_approved=approved)
         if args.rollback is not None:
-            return store.rollback(args.rollback, signer, public_scope_approved=approved)
+            return store.rollback(args.rollback, signer, public_scope_approved=approved,
+                                  approval=args.deletion_approval)
         require(args.rstone and args.tds, "both source paths required")
         snapshot = collect(args.rstone, args.tds)
         return store.prepare(snapshot, signer, public_scope_approved=approved,

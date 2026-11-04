@@ -57,7 +57,10 @@ def check_payload(path, raw):
     except UnicodeError:
         raise DataError("public price gate: category=uninspectable-payload") from None
     check_price(path, text)
-    if path.endswith(".json"):
+    from .sources import structured_marker, inspect_structured
+    if structured_marker(raw):
+        inspect_structured(path, raw)
+    elif path.endswith(".json"):
         check_metadata(path, decode_json(raw))
     elif text.splitlines() and text.splitlines()[0].strip() == "---":
         # Object hashes do not carry their logical names; apply the same YAML decoder.

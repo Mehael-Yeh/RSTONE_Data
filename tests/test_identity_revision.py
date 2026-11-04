@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import commit_all
+from conftest import commit_all, run_git
 from rstone_data import quality_gate as q
 from rstone_data.build import deletion_approval, inventory
 from rstone_data.protocol import DataError
@@ -47,11 +47,17 @@ def change(sources, remove, add):
     rstone, tds = sources
     for name in remove:
         (rstone/'产品列表'/(name+'.md')).unlink()
+        # Stage the exact removal before adding a differently-cased name.
+        # Case-insensitive working trees can otherwise retain the old index name.
+        run_git(rstone, 'rm', '--cached', '--', '产品列表/'+name+'.md')
     for name, raw in add.items():
         validate_markdown('产品列表/'+name+'.md', raw)
         (rstone/'产品列表'/(name+'.md')).write_bytes(raw)
     commit_all(rstone)
-    return collect(rstone, tds)
+    after = collect(rstone, tds)
+    assert {'产品列表/'+name+'.md' for name in add} <= after.files.keys()
+    assert not {'产品列表/'+name+'.md' for name in set(remove)-set(add)} & after.files.keys()
+    return after
 
 
 def deny(store, signing, after):

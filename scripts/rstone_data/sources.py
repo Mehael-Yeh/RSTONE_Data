@@ -25,6 +25,7 @@ class Snapshot:
     files: dict[str, bytes]
     commits: dict[str, str]
     warnings: list[dict] = field(default_factory=list)
+    manifest_sha256: str | None = None
 
 
 class UniqueLoader(yaml.SafeLoader):
@@ -45,6 +46,24 @@ def _mapping(loader, node):
 UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapping)
 
 
+def structured_marker(raw):
+    """A damaged/unknown new envelope is never silently treated as legacy."""
+    return (b"rstone-recipe/" in raw or
+            bool(re.match(rb"(?:\xef\xbb\xbf)?\s*---[^\n]*\n\s*(?:\{|schema\s*:)", raw)))
+
+
+def inspect_structured(path, raw):
+    """Decode opaque CAS/ZIP content without inventing a logical namespace."""
+    from . import recipe_codec
+    from .recipe_catalog import scan_model
+    try:
+        model = recipe_codec.parse(raw)
+    except ValueError as exc:
+        raise DataError("invalid structured recipe") from exc
+    scan_model(path, model)
+    return model
+
+
 def validate_markdown(path, raw):
     check_price(path, path)
     logical_path(path)
@@ -58,6 +77,10 @@ def validate_markdown(path, raw):
     require("\x00" not in text, f"NUL in Markdown: {path}")
     require(not text.startswith("version https://git-lfs.github.com/spec/v1"), f"unresolved Git LFS pointer: {path}")
     require(not SENSITIVE_CONTENT.search(text), f"sensitive content detected: {path}")
+    if structured_marker(raw):
+        require(path.startswith("产品配方/"), "recipe protocol in wrong namespace")
+        inspect_structured(path, raw)
+        return text
     lines = text.splitlines()
     required = path.split("/")[0] in ("产品列表", "产品应用")
     has_frontmatter = bool(lines) and lines[0].strip() == "---"

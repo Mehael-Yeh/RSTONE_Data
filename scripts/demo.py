@@ -66,8 +66,19 @@ def demonstrate(output):
                 elif path.startswith("产品应用/"):
                     raw = raw.replace("tags: [PC, 示例]".encode(), b"tags: [PC]")
                 snapshot.files[path] = raw
+            # New demo data is an explicit synthetic model, not an automatic
+            # legacy Markdown importer. Historical signed fixtures stay frozen.
+            from rstone_data.recipe_codec import emit, COLUMNS, SCHEMA
+            for path in list(snapshot.files):
+                if path.startswith("产品配方/"):
+                    del snapshot.files[path]
+            snapshot.files["产品配方/RS-DEMO1-底.md"] = emit({
+                "schema": SCHEMA, "recipeId": "SYNTH-DEMO-001", "title": "RS-DEMO1-底",
+                "classification": "main", "ownerProduct": "RS-DEMO1", "associatedProducts": ["RS-DEMO1"],
+                "columns": COLUMNS[0][:], "rows": [["[[RS-DEMO1]]", "100", "100", "", ""]],
+                "preTable": [], "content": []})
         publish(first)
-        initial = synchronize([base], output / "client", keys, allow_local_http=True)
+        initial = synchronize([base], output / "client", keys, app_version="2.0.2", allow_local_http=True)
         publish(second)
         third = copy.deepcopy(second)
         # A same-byte external-identifier copy needs no new object. Do not add
@@ -83,15 +94,16 @@ def demonstrate(output):
         fourth = copy.deepcopy(third)
         fourth.files["产品应用/PC/示例方案.md"] = fourth.files.pop("产品应用/示例方案.md")
         publish(fourth)
-        skipped = synchronize([base], output / "client", keys, allow_local_http=True)
+        skipped = synchronize([base], output / "client", keys, app_version="2.0.2", allow_local_http=True)
         require(skipped["sequence"] == 4 and skipped["downloadedObjects"] == 1, "demo delta mismatch")
         actual = active_directory(output / "client", keys)
         require({p.relative_to(actual).as_posix(): p.read_bytes() for p in actual.rglob("*.md")} == fourth.files,
                 "demo full-state mismatch")
-        store.rollback(1, signer, public_scope_approved=True)
+        store.rollback(1, signer, public_scope_approved=True,
+                       approval=deletion_approval(store.read(), inventory(first.files)))
         rollback = store.promote(lambda target: fetch_release(base, keys, target, allow_local_http=True))
         releases.append(rollback)
-        restored = synchronize([base], output / "client", keys, allow_local_http=True)
+        restored = synchronize([base], output / "client", keys, app_version="2.0.2", allow_local_http=True)
         require(restored["sequence"] == 5 and restored["downloadedObjects"] == 0, "demo rollback mismatch")
         no_change = publish(first)
         require(no_change["status"] == "unchanged", "demo no-op mismatch")

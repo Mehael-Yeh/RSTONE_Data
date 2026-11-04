@@ -15,6 +15,21 @@ def deploy_mirror(source, target, base_url, keys, allow_local_http=False):
     pointer = decode_json(latest)
     new_objects = 0
     new_bytes = 0
+    # Preflight the entire outgoing history before the first target write.
+    # Historical schema1 is copied byte-exact under its existing signature;
+    # every schema2 generation must still satisfy current release authority.
+    outgoing = []
+    for sequence in store.sequences():
+        if sequence > current["sequence"]:
+            continue
+        path = manifest_name(sequence)
+        raw = (store.public / path).read_bytes()
+        manifest = decode_json(raw)
+        historical_pointer = pointer_for(manifest, raw)
+        store.read(historical_pointer)
+        if manifest["schemaVersion"] == 2:
+            store._release_quality(manifest)
+        outgoing.append((path, raw, manifest, historical_pointer))
     # target is already the public directory, not a publisher store.
     with ReleaseLock(target):
         from pathlib import Path
@@ -23,14 +38,7 @@ def deploy_mirror(source, target, base_url, keys, allow_local_http=False):
             old = decode_json(old_latest.read_bytes())
             require(old["sequence"] <= pointer["sequence"], "mirror cannot decrease sequence")
             require(old["sequence"] != pointer["sequence"] or old == pointer, "mirror sequence conflict")
-        for sequence in store.sequences():
-            if sequence > current["sequence"]:
-                continue
-            path = manifest_name(sequence)
-            raw = (store.public / path).read_bytes()
-            manifest = decode_json(raw)
-            historical_pointer = pointer_for(manifest, raw)
-            store.read(historical_pointer)
+        for path, raw, manifest, historical_pointer in outgoing:
             for record in manifest["files"]:
                 content = store.object(record)
                 if immutable_write(target, "objects/" + record["sha256"], content):

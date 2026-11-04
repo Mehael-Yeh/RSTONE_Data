@@ -82,6 +82,8 @@ class Store:
             if verify_objects:
                 for record in manifest["files"]:
                     validate_markdown(record["path"], self.object(record))
+                if manifest["schemaVersion"] == 2:
+                    self._require_structured(self._snapshot(manifest))
             return manifest
         except OSError as exc:
             raise DataError("release resource missing or unreadable") from exc
@@ -103,7 +105,8 @@ class Store:
 
     def _snapshot(self, manifest):
         return Snapshot({r["path"]: self.object(r) for r in manifest["files"]},
-                        manifest["sourceCommits"])
+                        manifest["sourceCommits"], manifest_sha256=sha256(
+                            safe_file(self.public, manifest_name(manifest["sequence"])).read_bytes()))
 
     def _signed_snapshot(self, sequence):
         """Verify and return the exact signed bytes of a published release."""
@@ -112,6 +115,50 @@ class Store:
         self.read(pointer_for(manifest, raw))
         return self._snapshot(manifest)
 
+    def _require_structured(self, snapshot):
+        from .recipe_codec import parse
+        for path, raw in snapshot.files.items():
+            if path.startswith("产品配方/"):
+                try:
+                    parse(raw)
+                except ValueError as exc:
+                    raise DataError("public quality gate rejected candidate: checks=identity; structured recipe required") from exc
+
+    def _bound_quality_baseline(self, manifest, baseline_sequence, earlier, control):
+        """A pending marker cannot turn an existing signed baseline into none."""
+        message = "public quality gate rejected candidate: checks=identity; baseline binding mismatch"
+        if control and control["pointer"]["sequence"] == manifest["sequence"]:
+            current = self.read()
+            previous_hash = control.get("previousLatestSha256")
+            if current is not None and current["sequence"] < manifest["sequence"]:
+                require(previous_hash == sha256(self.latest_bytes()), message)
+                expected = current["sequence"]
+            elif previous_hash is not None:
+                matches = []
+                for sequence in earlier:
+                    raw = safe_file(self.public, manifest_name(sequence)).read_bytes()
+                    prior = validate_manifest(decode_json(raw))
+                    if sha256(canonical_json(pointer_for(prior, raw))) == previous_hash:
+                        self.read(pointer_for(prior, raw))
+                        matches.append(sequence)
+                require(len(matches) == 1, message)
+                expected = matches[0]
+            else:
+                expected = None
+            if baseline_sequence is not _INFER:
+                require(baseline_sequence == expected, message)
+            baseline_sequence = expected
+        if baseline_sequence is None and earlier:
+            # A failed initial typed attempt may leave signed orphans before
+            # its retry, but legacy or previously-published history is never
+            # evidence for a fresh, baseline-free schema2 initial release.
+            for sequence in earlier:
+                raw = safe_file(self.public, manifest_name(sequence)).read_bytes()
+                prior = validate_manifest(decode_json(raw))
+                require(prior["schemaVersion"] == 2 and not safe_file(
+                    self.state, f"reports/{sequence:06d}.json").exists(), message)
+        return baseline_sequence
+
     def _release_quality(self, manifest, baseline_sequence=_INFER):
         # Only an earlier signed release can grandfather historical broken links.
         # Never compare a pending/restored release against itself. The baseline
@@ -119,7 +166,17 @@ class Store:
         # abandoned sequence (manifest written, pending.json never written) is
         # published nowhere and must not become the reference.
         sequences = self.sequences()
+        validation = self.pending()
+        if validation is None or validation["pointer"]["sequence"] != manifest["sequence"]:
+            report_path = safe_file(self.state, f"reports/{manifest['sequence']:06d}.json")
+            validation = {"summary": decode_json(report_path.read_bytes())} if report_path.exists() else {}
+        summary = validation.get("summary", {})
+        manifest_digest = sha256(safe_file(self.public, manifest_name(manifest["sequence"])).read_bytes())
+        bound = summary.get("manifestSha256") == manifest_digest
+        if baseline_sequence is _INFER and bound:
+            baseline_sequence = summary.get("qualityBaselineSequence", _INFER)
         earlier = [seq for seq in sequences if seq < manifest["sequence"]]
+        baseline_sequence = self._bound_quality_baseline(manifest, baseline_sequence, earlier, self.pending())
         if baseline_sequence is _INFER:
             baseline_sequence = max(earlier) if earlier else None
         elif baseline_sequence is None:
@@ -138,9 +195,23 @@ class Store:
             # link the newer release fixed a brand-new violation.
             links_baseline = self._rollback_baseline(manifest["rollbackOf"],
                                                      self._snapshot(manifest))
-        return validate_snapshot(self._snapshot(manifest), baseline,
-                                 identity_baseline=manifest.get("rollbackOf") is None,
-                                 references_baseline=links_baseline)
+            target = validate_manifest(decode_json(safe_file(
+                self.public, manifest_name(manifest["rollbackOf"])).read_bytes()))
+            require(manifest["schemaVersion"] == target["schemaVersion"], "restore schema mismatch")
+            require(manifest["minAppVersion"] == target["minAppVersion"], "restore client requirement mismatch")
+        if manifest["schemaVersion"] == 2:
+            self._require_structured(self._snapshot(manifest))
+        else:
+            require(manifest.get("rollbackOf") is not None,
+                    "public quality gate rejected candidate: checks=identity; legacy release requires exact signed restore")
+        quality = validate_snapshot(self._snapshot(manifest), baseline,
+                                    identity_baseline=manifest.get("rollbackOf") is None,
+                                    references_baseline=links_baseline)
+        previous_manifest = validate_manifest(decode_json(safe_file(
+            self.public, manifest_name(baseline_sequence)).read_bytes())) if baseline_sequence is not None else None
+        check_deletions(previous_manifest, manifest["files"], 0.25,
+                        summary.get("deletionApproval") if bound else None)
+        return quality
 
     def _rollback_baseline(self, sequence, snapshot):
         """Re-admit only the exact signed bytes of the release being restored.
@@ -154,17 +225,24 @@ class Store:
         raw = path.read_bytes()
         manifest = validate_manifest(decode_json(raw))
         self.read(pointer_for(manifest, raw))
+        if manifest["schemaVersion"] == 2:
+            pending = self.pending()
+            baseline = _pending_baseline(pending) if pending and pending["pointer"]["sequence"] == sequence else _INFER
+            self._release_quality(manifest, baseline)
         signed = self._snapshot(manifest)
+        require(snapshot.commits == manifest["sourceCommits"], "rollback provenance does not match signed release")
         require(set(signed.files) == set(snapshot.files), "rollback snapshot does not match signed release")
         for name, data in signed.files.items():
-            require(sha256(data) == sha256(snapshot.files[name]),
+            require(len(data) == len(snapshot.files[name]) and sha256(data) == sha256(snapshot.files[name]),
                     "rollback snapshot does not match signed release")
         return signed
 
-    def prepare(self, snapshot, signer, *, public_scope_approved=False, min_app_version="1.0.0",
+    def prepare(self, snapshot, signer, *, public_scope_approved=False, min_app_version="2.0.2",
                 max_deletion_fraction=0.25, approval=None, now=None, rollback_of=None, failpoint=None):
         require(public_scope_approved, "public data scope must be explicitly approved before publishing")
         require(signer is not None, "production signing key required")
+        require(type(max_deletion_fraction) in (float, int) and 0 <= max_deletion_fraction <= 0.25,
+                "deletion threshold cannot exceed 0.25")
         if snapshot is not None:
             check_payload("snapshot-metadata.json", canonical_json({
                 "sourceCommits": snapshot.commits, "warnings": snapshot.warnings}))
@@ -180,15 +258,18 @@ class Store:
             for path, raw in snapshot.files.items():
                 validate_markdown(path, raw)
             links_baseline = self._snapshot(previous) if previous else None
+            restored_manifest = None
             if rollback_of is not None:
                 links_baseline = self._rollback_baseline(rollback_of, snapshot)
+                restored_manifest = validate_manifest(decode_json(
+                    safe_file(self.public, manifest_name(rollback_of)).read_bytes()))
             quality = validate_snapshot(snapshot, self._snapshot(previous) if previous else None,
                                         identity_baseline=rollback_of is None,
                                         references_baseline=links_baseline)
+            if rollback_of is None:
+                self._require_structured(snapshot)
             records = inventory(snapshot.files)
-            check_deletions(previous, records, max_deletion_fraction,
-                            approval if rollback_of is None else
-                            f"{previous['sequence']}:{mapping_digest(records)}" if previous else None)
+            check_deletions(previous, records, max_deletion_fraction, approval)
             diff = changes(previous, records)
             summary = {"added": len(diff["added"]), "modified": len(diff["modified"]),
                        "deleted": len(diff["deleted"]), "unchanged": len(diff["unchanged"]),
@@ -203,7 +284,18 @@ class Store:
             manifest = make_manifest(snapshot, sequence, moment.strftime("%Y.%m.%d") + f".{sequence:03d}",
                                      moment.strftime("%Y-%m-%dT%H:%M:%SZ"), signer.key_id,
                                      min_app_version, rollback_of)
+            if restored_manifest is not None:
+                manifest["schemaVersion"] = restored_manifest["schemaVersion"]
+                manifest["minAppVersion"] = restored_manifest["minAppVersion"]
+            else:
+                manifest["schemaVersion"] = 2
+                from .client import version_tuple
+                if version_tuple(min_app_version) < (2, 0, 2):
+                    manifest["minAppVersion"] = "2.0.2"
+            validate_manifest(manifest)
             raw_manifest = canonical_json(manifest)
+            summary.update(manifestSha256=sha256(raw_manifest), deletionApproval=approval,
+                           qualityBaselineSequence=previous["sequence"] if previous else None)
             signature = signer.sign(raw_manifest)
             pointer = pointer_for(manifest, raw_manifest)
             verify_release(pointer, raw_manifest, signature, self.keys)
