@@ -49,7 +49,7 @@ def full_snapshot(body):
     return Snapshot({
         PATH: (HEADER + body).encode(),
         "产品应用/synthetic-application.md": "---\ntags: [PC]\n---\nSynthetic application.\n".encode(),
-        "产品配方/synthetic-recipe.md": b"| resin | amount |\n| --- | --- |\n| synthetic | 100 |\n",
+        "产品配方/RS99123401-底.md": __import__("recipe_fixtures").typed("RS99123401", "RS99123401-底"),
         "产品TDS/RS99123401.TDS.md": b"# RS99123401\nSynthetic technical data.\n",
     }, {"Mehael-Yeh/Rstone": "a" * 40, "Mehael-Yeh/RstoneTDS": "b" * 40})
 
@@ -74,7 +74,7 @@ def test_r1_exact_four_reject_content_at_real_six_exits(store, signing, operatio
     report = q.evaluate(q.snapshot_corpus(snapshot), None, q.load_vocabulary(None), 0, 0, False).json()
     assert report["summary"]["failed_checks"] == ["content"]
     if operation != "prepare":
-        install_legacy(store, signing[0], snapshot, pending=operation in ("resume", "promote", "complete"))
+        install_legacy(store, signing[0], snapshot, pending=operation in ("resume", "promote", "complete"), schema_version=2)
     before = artifact_bytes(store)
     signer, verified = RecordingSigner(signing[0]), []
     with pytest.raises(DataError, match="checks=content$"):

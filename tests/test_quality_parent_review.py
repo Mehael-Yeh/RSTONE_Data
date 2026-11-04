@@ -103,7 +103,7 @@ def test_rollback_can_restore_a_signed_release_with_historical_broken_link(store
     """Recovery path: re-admitting already-published signed bytes must not be blocked."""
     from test_release_quality import install_legacy
     old = clean_snapshot()
-    old.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    old.files['产品TDS/RS100.TDS.md'] += b'[[RS999999]]\n'
     install_legacy(store, signing[0], old, sequence=1)
     store.prepare(clean_snapshot(), signing[0], public_scope_approved=True)
     store.promote()
@@ -123,10 +123,10 @@ def test_gc_keeps_the_baseline_a_retained_release_needs(store, signing):
     from test_release_quality import install_legacy
     from rstone_data.release import utc_now
     old = clean_snapshot()
-    old.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    old.files['产品TDS/RS100.TDS.md'] += b'[[RS999999]]\n'
     install_legacy(store, signing[0], old, sequence=1)
     inherited = clean_snapshot()
-    inherited.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    inherited.files['产品TDS/RS100.TDS.md'] += b'[[RS999999]]\n'
     inherited.files['产品列表/RS100.md'] = inherited.files['产品列表/RS100.md'].replace(
         '固含: 77'.encode(), '固含: 80'.encode())
     result = store.prepare(inherited, signing[0], public_scope_approved=True)
@@ -142,7 +142,7 @@ def test_abandoned_manifest_does_not_become_the_revalidation_baseline(store, sig
     """Baseline is the published release prepare() used, not the highest sequence on disk."""
     from test_release_quality import install_legacy
     old = clean_snapshot()
-    old.files['产品配方/配方.md'] += b'[[RS999999]]\n'
+    old.files['产品TDS/RS100.TDS.md'] += b'[[RS999999]]\n'
     install_legacy(store, signing[0], old, sequence=1)
 
     def interrupt(name):
@@ -150,7 +150,7 @@ def test_abandoned_manifest_does_not_become_the_revalidation_baseline(store, sig
             raise RuntimeError('interrupted after signing')
 
     abandoned = clean_snapshot()
-    abandoned.files['产品配方/配方.md'] = b'| RS100 | 100 |\n'  # fixes the historical link
+    abandoned.files['产品TDS/RS100.TDS.md'] = b'| RS100 | 100 |\n'  # fixes the historical link
     abandoned.files['产品列表/RS100.md'] = abandoned.files['产品列表/RS100.md'].replace(
         '固含: 77'.encode(), '固含: 78'.encode())
     with pytest.raises(RuntimeError):
@@ -159,7 +159,7 @@ def test_abandoned_manifest_does_not_become_the_revalidation_baseline(store, sig
     assert 2 in store.sequences()  # signed but never published
 
     candidate = clean_snapshot()
-    candidate.files['产品配方/配方.md'] += b'[[RS999999]]\n'  # keeps sequence 1's link
+    candidate.files['产品TDS/RS100.TDS.md'] += b'[[RS999999]]\n'  # keeps sequence 1's link
     candidate.files['产品列表/RS100.md'] = candidate.files['产品列表/RS100.md'].replace(
         '固含: 77'.encode(), '固含: 80'.encode())
     result = store.prepare(candidate, signing[0], public_scope_approved=True)
@@ -175,7 +175,7 @@ def test_rollback_of_mismatched_snapshot_is_rejected(store, signing):
     impossible = clean_snapshot()
     install_legacy(store, signing[0], impossible, sequence=1)
     tampered = clean_snapshot()
-    tampered.files['产品配方/配方.md'] = b'[[RS777777]]\n'
+    tampered.files['产品配方/RS100-底.md'] = b'[[RS777777]]\n'
     with pytest.raises(DataError, match='quality gate|signed release'):
         store.prepare(tampered, signing[0], public_scope_approved=True, rollback_of=1)
 

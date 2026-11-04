@@ -3,7 +3,17 @@ import shutil
 import zipfile
 
 import pytest
-from rstone_data.client import active_directory, import_package, synchronize
+from rstone_data.client import active_directory, import_package as _import_package, synchronize as _synchronize
+
+
+def synchronize(*args, **kwargs):
+    kwargs.setdefault("app_version", "2.0.2")
+    return _synchronize(*args, **kwargs)
+
+
+def import_package(*args, **kwargs):
+    kwargs.setdefault("app_version", "2.0.2")
+    return _import_package(*args, **kwargs)
 from rstone_data.protocol import DataError, decode_json, sha256
 from rstone_data.release import Store
 from rstone_data.sources import collect
@@ -141,15 +151,15 @@ def test_signed_same_sequence_conflict_fails_closed(store, sources, signing, tmp
 
 def test_min_app_version_and_same_version_local_repair(store, sources, signing, tmp_path, serve):
     first = collect(*sources)
-    publish(store, first, signing[0], min_app_version="2.0.0")
+    publish(store, first, signing[0], min_app_version="2.0.2")
     cache = tmp_path / "client"
     with serve(store.public) as base:
         with pytest.raises(DataError, match="upgrade required"):
-            synchronize([base], cache, signing[1], allow_local_http=True)
-        synchronize([base], cache, signing[1], app_version="2.0.0", allow_local_http=True)
+            synchronize([base], cache, signing[1], app_version="1.0.0", allow_local_http=True)
+        synchronize([base], cache, signing[1], app_version="2.0.2", allow_local_http=True)
         directory = active_directory(cache, signing[1])
         (directory / "产品列表/RS100.md").write_bytes(b"corrupt")
-        repaired = synchronize([base], cache, signing[1], app_version="2.0.0", allow_local_http=True)
+        repaired = synchronize([base], cache, signing[1], app_version="2.0.2", allow_local_http=True)
         assert repaired["downloadedObjects"] == 0
         assert (active_directory(cache, signing[1]) / "产品列表/RS100.md").read_bytes() == first.files["产品列表/RS100.md"]
 

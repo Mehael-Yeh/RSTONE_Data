@@ -101,7 +101,10 @@ def validate_manifest(manifest):
     require(type(manifest.get("protocolVersion")) is int and manifest["protocolVersion"] == PROTOCOL,
             "unsupported protocol")
     require(integer(manifest.get("sequence"), 1), "invalid sequence")
-    require(type(manifest.get("schemaVersion")) is int and manifest["schemaVersion"] == SCHEMA,
+    if "rollbackOf" in manifest:
+        require(integer(manifest["rollbackOf"], 1) and manifest["rollbackOf"] < manifest["sequence"],
+                "invalid restore target sequence")
+    require(type(manifest.get("schemaVersion")) is int and manifest["schemaVersion"] in (1, 2),
             "unsupported schema")
     require(isinstance(manifest.get("dataVersion"), str) and
             re.fullmatch(r"[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{3,}", manifest["dataVersion"]),
