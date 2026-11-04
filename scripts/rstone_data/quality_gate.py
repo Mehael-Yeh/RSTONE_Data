@@ -297,6 +297,28 @@ def load_identity_migrations() -> frozenset[str]:
         raise InputError("identity migration policy unavailable") from exc
 
 
+def default_catalog_revisions() -> Path:
+    # Publisher code-repository policy only: no source, environment or CLI override.
+    return Path(__file__).resolve().parents[2] / "config" / "catalog_revisions.json"
+
+
+def load_catalog_revisions() -> frozenset[str]:
+    from .catalog_revisions import SCHEMA as CATALOG_SCHEMA
+    try:
+        path = default_catalog_revisions()
+        require(not path.is_symlink(), "invalid catalogue policy")
+        payload = decode_json(path.read_bytes())
+        require(isinstance(payload, dict) and set(payload) == {"schema", "approvals"}
+                and payload["schema"] == CATALOG_SCHEMA, "invalid catalogue policy")
+        approvals = payload["approvals"]
+        require(isinstance(approvals, list) and all(isinstance(item, str)
+                and SHA256.fullmatch(item) for item in approvals)
+                and len(set(approvals)) == len(approvals), "invalid catalogue approvals")
+        return frozenset(approvals)
+    except (OSError, DataError) as exc:
+        raise InputError("catalogue revision policy unavailable") from exc
+
+
 def load_vocabulary(source) -> frozenset[str]:
     if isinstance(source, (set, frozenset)):
         return frozenset(source)
@@ -328,6 +350,7 @@ class Report:
         self.baseline: dict | None = None
         self.read_only = True
         self.warnings: list[dict] = []
+        self.catalog_revision = None
         self.generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     def add(self, ident: int, name: str, checked: int, findings: list[dict]) -> None:
@@ -370,6 +393,7 @@ class Report:
             "baseline": self.baseline,
             "checks": self.checks,
             "warnings": self.warnings,
+            **({"catalogRevision": self.catalog_revision} if self.catalog_revision else {}),
             "summary": {
                 "ok": self.ok,
                 "failed_checks": failed,
@@ -506,6 +530,113 @@ def _suffix_shortened(original: str, candidate: str) -> bool:
     return original.casefold().startswith(candidate.casefold() + "-")
 
 
+def _recipe_product_ids(doc: Document, corpus: Corpus) -> set[str]:
+    """Credit a registered identity only in a real, quantified ingredient row.
+
+    Association metadata alone is not evidence. This intentionally recognizes
+    the existing five-column recipe format, not arbitrary Markdown tables.
+    Detection never changes document bytes or folds a product identity.
+    """
+    if doc.namespace != "产品配方":
+        return set()
+    products = set(corpus.stems("产品列表"))
+    claim = (doc.frontmatter or {}).get("关联产品")
+    if claim is not None:
+        if not isinstance(claim, str):
+            return set()
+        products &= {_reference_target(link) for link in WIKI_LINK.findall(claim)}
+    lines = []
+    fence = ""
+    excluded_level = 0
+    body = re.sub(r"<!--.*?(?:-->|$)", "\n", doc.body, flags=re.S)
+    for line in body.splitlines():
+        text = line.strip()
+        if fence:
+            if re.fullmatch(re.escape(fence[0]) + "{" + str(len(fence)) + r",}\s*", text):
+                fence = ""
+            continue
+        opening = re.match(r"(`{3,}|~{3,})", text)
+        if opening:
+            fence = opening[1]
+            lines.append("")
+            continue
+        heading = HEADING.match(text)
+        if heading:
+            level = len(heading[1])
+            if excluded_level and level <= excluded_level:
+                excluded_level = 0
+            if NONASSERTIONAL_BODY.search(text):
+                excluded_level = excluded_level or level
+        if excluded_level or line.startswith(("    ", "\t")) or text.startswith(">"):
+            lines.append("")
+        else:
+            lines.append(text)
+    identities: set[str] = set()
+    for index, line in enumerate(lines[:-2]):
+        # Consume at most one edge delimiter; adjacent pipes are empty cells.
+        header = [cell.strip() for cell in line.removeprefix("|").removesuffix("|").split("|")]
+        if len(header) != 5 or header[0] != "原料编号" \
+                or header[1] not in ("投入数", "投入数(g)") \
+                or header[2:] != ["百分比(%)", "供应商", "备注"]:
+            continue
+        separator = lines[index + 1].removeprefix("|").removesuffix("|").split("|")
+        if len(separator) != 5 or not all(re.fullmatch(r"\s*:?-{3,}:?\s*", cell)
+                                          for cell in separator):
+            continue
+        table_ids: set[str] = set()
+        valid = True
+        for row in lines[index + 2:]:
+            if not row.startswith("|"):
+                break
+            # Wiki aliases contain pipes: require an exact, unaliased identity
+            # for this narrow exception rather than guessing column positions.
+            cells = [cell.strip() for cell in row.removeprefix("|").removesuffix("|").split("|")]
+            if len(cells) != 5 or not cells[0]:
+                valid = False
+                break
+            amount = re.fullmatch(r"(\d+(?:\.\d+)?)(?:\s*[-–~]\s*(\d+(?:\.\d+)?))?", cells[1])
+            if not amount:
+                if cells[1] not in ("适量", "少量"):
+                    valid = False
+                    break
+                continue
+            low = float(amount[1])
+            high = float(amount[2] or amount[1])
+            if low > high:
+                valid = False
+                break
+            material = cells[0]
+            link = WIKI_LINK.fullmatch(material)
+            identity = link[1] if link else material
+            if identity in products and low > 0:
+                table_ids.add(identity)
+        if valid:
+            identities.update(table_ids)
+    return identities
+
+
+def _recipe_editorial_rename(original: Document, candidate: Document,
+                             baseline: Corpus, corpus: Corpus) -> bool:
+    """Only a known editorial tail may disappear, never a product suffix."""
+    if candidate.namespace != "产品配方" or not original.stem.startswith(candidate.stem):
+        return False
+    tail = original.stem[len(candidate.stem):]
+    scheme = r"(?:[0-9]+|RS[0-9]+(?:-[A-Za-z0-9]+)*)"
+    if not re.fullmatch(r"-(?:参考配方(?:-方案" + scheme + r")?|方案" + scheme + r")", tail):
+        return False
+    named_ids = []
+    for doc, tree in ((original, baseline), (candidate, corpus)):
+        # Longest complete registered identity wins; a base cannot stand in for
+        # a more specific suffix even when both appear in the ingredient table.
+        matches = [stem for stem in tree.stems("产品列表")
+                   if doc.stem == stem or doc.stem.startswith(stem + "-")]
+        identity = max(matches, key=len) if matches else None
+        if identity is None or identity not in _recipe_product_ids(doc, tree):
+            return False
+        named_ids.append(identity)
+    return named_ids[0] == named_ids[1]
+
+
 def check_identity(corpus: Corpus, baseline: Corpus | None,
                    approvals: frozenset[str] = frozenset()) -> list[dict]:
     violations: list[dict] = list(corpus.stray)
@@ -519,7 +650,9 @@ def check_identity(corpus: Corpus, baseline: Corpus | None,
     product_stems = {doc.stem.casefold() for doc in corpus.by_namespace("产品列表")}
     for namespace in ("产品应用", "产品配方"):
         for doc in corpus.by_namespace(namespace):
-            if doc.stem.casefold() in product_stems:
+            if doc.stem.casefold() in product_stems \
+                    and not (namespace == "产品配方"
+                             and doc.stem in _recipe_product_ids(doc, corpus)):
                 violations.append({"path": doc.path,
                                    "category": "stem-collision-cross-namespace"})
     for doc in corpus.by_namespace("产品列表"):
@@ -569,6 +702,7 @@ def check_identity(corpus: Corpus, baseline: Corpus | None,
             # receipt. Credit is product-only; other namespaces get no migration
             # exemption. Never infer coverage from counts or a shorter prefix.
             uncovered = set(before) - after - (migrated if namespace == "产品列表" else set())
+            before_docs = {doc.stem: doc for doc in baseline.by_namespace(namespace)}
             for doc in corpus.by_namespace(namespace):
                 stem = doc.stem
                 if stem in before:
@@ -578,7 +712,9 @@ def check_identity(corpus: Corpus, baseline: Corpus | None,
                     violations.append({"path": doc.path,
                                        "category": "identity-case-rewritten"})
                     continue
-                if any(_suffix_shortened(other, stem) for other in uncovered):
+                if any(_suffix_shortened(other, stem) and not (
+                        namespace == "产品配方" and _recipe_editorial_rename(
+                            before_docs[other], doc, baseline, corpus)) for other in uncovered):
                     violations.append({"path": doc.path,
                                        "category": "identity-suffix-dropped"})
             if namespace == "产品列表":
@@ -1010,6 +1146,98 @@ def check_retention(corpus: Corpus, baseline: Corpus | None, expect_recipes: int
     return violations
 
 
+def _notes_table_cells(line: str) -> tuple[str, ...]:
+    """Split real pipe delimiters, retaining escaped pipes as cell content."""
+    if line.expandtabs(4).startswith("    "):
+        return ()  # indented code is not a table
+    cells = re.split(r"(?<!\\)\|", line.strip())
+    if len(cells) < 2:
+        return ()
+    if not cells[0].strip():
+        cells.pop(0)
+    if cells and not cells[-1].strip():
+        cells.pop()
+    return tuple(cell.strip() for cell in cells)
+
+
+def _notes_duplicate_units(body: str) -> list[object]:
+    """Keep prose global, but compare complete performance rows in test context."""
+    # _notes_blocks intentionally drops headings; preserve them here as table
+    # context only. They must never reset the global ordinary-prose comparison.
+    blocks: list[list[str]] = []
+    level = 0
+    for raw in body.splitlines():
+        line = raw.strip()
+        note = NOTES_HEADING.match(line)
+        heading = HEADING.match(line)
+        if note:
+            level = len(note.group(1))
+            blocks.append([])
+        elif heading and len(heading.group(1)) <= level:
+            level = 0
+        elif level:
+            blocks[-1].append(raw.rstrip())
+    prose: list[str] = []
+    rows: list[object] = []
+    for block in blocks:
+        fence = ""
+        headings: dict[int, str] = {}
+        label = ""
+        context: dict[str, str] = {}
+        index = 0
+        while index < len(block):
+            line = block[index]
+            # CommonMark permits at most three leading spaces on fences.
+            # A closing fence cannot carry a language/name suffix.
+            marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if marker:
+                token, tail = marker.group(1), marker.group(2)
+                if not fence:
+                    if token[0] != "`" or "`" not in tail:
+                        fence = token
+                elif (token[0] == fence[0] and len(token) >= len(fence)
+                      and re.fullmatch(r"[ \t]*", tail)):
+                    fence = ""
+                prose.append(line)
+                index += 1
+                continue
+            heading = HEADING.match(line)
+            if not fence and heading:
+                depth = len(heading.group(1))
+                headings = {key: value for key, value in headings.items() if key < depth}
+                headings[depth] = line[heading.end():].strip()
+                label, context = "", {}
+                index += 1
+                continue
+            if not fence:
+                if re.fullmatch(r"(?:\*\*.+\*\*|__.+__)", line):
+                    label = line
+                condition = re.match(r"^(?:[-*]\s*)?(配方|基方|工艺|施工|测试条件|固化|条件)\s*[:：]", line)
+                if condition:
+                    context[condition.group(1)] = line[condition.end():].strip()
+            header = _notes_table_cells(line)
+            delimiter = (_notes_table_cells(block[index + 1])
+                         if index + 1 < len(block) else ())
+            if (not fence and len(header) >= 2 and len(header) == len(delimiter)
+                    and all(re.fullmatch(r":?-{3,}:?", cell) for cell in delimiter)):
+                index += 2
+                performance = (len(header) == 4 and header[0] == "项目"
+                               and header[1] in ("基材或对象", "基材/对象", "对象", "基材")
+                               and header[2] in ("测试条件", "条件") and header[3] == "结果")
+                while performance and index < len(block):
+                    cells = _notes_table_cells(block[index])
+                    if len(cells) != len(header):
+                        break
+                    rows.append((tuple(sorted(headings.items())), label,
+                                 tuple(sorted(context.items())), cells))
+                    index += 1
+                continue
+            prose.append(line)
+            index += 1
+    return rows + [sentence.strip() for sentence in SENTENCE.findall("\n".join(prose))
+                   if len(sentence.strip()) >= 20]
+
+
 def check_notes(corpus: Corpus) -> list[dict]:
     violations: list[dict] = []
     for doc in corpus.documents:
@@ -1027,8 +1255,7 @@ def check_notes(corpus: Corpus) -> list[dict]:
             violations.append(_failure(doc.path, "notes-brochure"))
         if any(pattern.search(joined) for pattern in INTERNAL_PHRASES):
             violations.append(_failure(doc.path, "notes-internal-phrase"))
-        sentences = [sentence.strip() for sentence in SENTENCE.findall(joined)
-                     if len(sentence.strip()) >= 20]
+        sentences = _notes_duplicate_units(doc.body)
         if len(sentences) != len(set(sentences)):
             violations.append(_failure(doc.path, "notes-duplicated"))
     return violations
@@ -1077,8 +1304,11 @@ def evaluate(corpus, base_corpus, allowed, expect_recipes, expect_applications,
     report.counts = {namespace: len(corpus.by_namespace(namespace)) for namespace in NAMESPACES}
     report.counts["documents"] = len(corpus.documents)
 
-    report.add(1, "identity", len(corpus.documents),
-               check_identity(corpus, base_corpus, load_identity_migrations()))
+    from .catalog_revisions import apply as apply_catalog_revision
+    findings = check_identity(corpus, base_corpus, load_identity_migrations())
+    findings, report.catalog_revision = apply_catalog_revision(
+        corpus, base_corpus, findings, load_catalog_revisions())
+    report.add(1, "identity", len(corpus.documents), findings)
     report.add(2, "tags", sum(1 for doc in corpus.documents
                               if doc.namespace in ("产品列表", "产品应用")),
                check_tags(corpus, allowed))
