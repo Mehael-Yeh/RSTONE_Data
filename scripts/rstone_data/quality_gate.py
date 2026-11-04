@@ -1387,7 +1387,7 @@ def check_notes(corpus: Corpus) -> list[dict]:
                   else _notes_blocks(doc.body))
         if not blocks:
             continue
-        items = [item for block in blocks for item in block if item]
+        items = [item for block in blocks for item in block if item.strip()]
         if not items:
             violations.append(_failure(doc.path, "notes-empty"))
             continue
