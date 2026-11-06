@@ -11,10 +11,6 @@ on:
         description: Exact baselineSequence:mappingSha256 from failed deletion report
         type: string
         required: false
-  repository_dispatch:
-    types: [rstone-data-changed]
-  schedule:
-    - cron: '23 */6 * * *'
 
 permissions:
   contents: read
