@@ -3,7 +3,7 @@ name = "rstone-data"
 version = "1.0.0"
 description = "Signed, content-addressed RSTONE data distribution"
 requires-python = ">=3.12"
-dependencies = ["cryptography==50.0.2", "PyYAML==6.0.3"]
+dependencies = ["cryptography==50.0.2", "PyYAML==6.0.4"]
 
 [project.scripts]
 rstone-data = "rstone_data.cli:main"
